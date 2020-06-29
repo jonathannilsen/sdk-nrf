@@ -1,0 +1,4 @@
+tests:
+  uart_dfu.uart_dfu_host:
+    platform_whitelist: qemu_cortex_m3 native_posix
+    tags: uart dfu uart_dfu_host

@@ -74,6 +74,10 @@ if(CONFIG_BOOTLOADER_MCUBOOT)
       COMMAND
       ${zb_add_ota_header_cmd}
 
+      # Add UART DFU header to signed application
+      COMMAND
+      ${uart_dfu_add_header_cmd}
+
       DEPENDS
       ${sign_depends}
       )
@@ -150,6 +154,17 @@ if(CONFIG_BOOTLOADER_MCUBOOT)
     else()
       set(zb_add_ota_header_cmd "")
     endif(CONFIG_ZIGBEE)
+
+  if (CONFIG_UART_DFU_LIBRARY)
+    set(uart_dfu_add_header_cmd
+      ${PYTHON_EXECUTABLE}
+      ${NRF_DIR}/scripts/bootloader/uart_dfu_add_header.py
+      ${PROJECT_BINARY_DIR}/app_update.bin
+      ${PROJECT_BINARY_DIR}/app_update_uart.bin
+      )
+    else()
+      set(uart_dfu_add_header_cmd "")
+    endif(CONFIG_UART_DFU_LIBRARY)  
 
   set(app_offset $<TARGET_PROPERTY:partition_manager,PM_MCUBOOT_PRIMARY_SIZE>)
 

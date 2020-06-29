@@ -1,0 +1,45 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "nRF9160 DK UART DFU nRF52 sample"
+
+config DFU_THREAD
+	bool "Spawn a separate thread for calling DFU target functions"
+	default y
+	select RING_BUFFER
+	help
+	  If enabled, a separate thread will be spawned for progressively
+	  storing a DFU image. Data transferred over GATT will be copied to
+	  a ring buffer in order to minimize blocking of the BT RX thread.
+	  If disabled, all DFU processing will remain in the BT RX thread,
+	  which can be more efficient but less safe.
+
+config DFU_THREAD_PRIO
+	int "Priority level of the DFU thread"
+	range UART_DFU_LIBRARY_THREAD_PRIO NUM_PREEMPT_PRIORITIES
+	default 0 if !MULTITHREADING
+	default 12
+	depends on DFU_THREAD
+	help
+	  This priority needs to be strictly lower (higher value) than
+	  CONFIG_UART_DFU_LIBRARY_THREAD_PRIO. This will be statically
+	  enforced by application code.
+
+config DFU_THREAD_STACK_SIZE
+	int "Size of the stack used by the DFU thread"
+	default 512
+	depends on DFU_THREAD
+
+config DFU_THREAD_BUF_SIZE
+	int "Size of the ring buffer used by the DFU thread"
+	default 512
+	depends on DFU_THREAD
+
+endmenu
+
+menu "Zephyr Kernel"
+source "Kconfig.zephyr"
+endmenu
