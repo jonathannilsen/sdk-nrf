@@ -1,0 +1,9 @@
+&uart1 {
+	current-speed = <115200>;
+	status = "okay";
+	tx-pin = <31>;
+	rx-pin = <30>;
+	rts-pin = <27>;
+	cts-pin = <26>;
+	hw-flow-control;
+};
