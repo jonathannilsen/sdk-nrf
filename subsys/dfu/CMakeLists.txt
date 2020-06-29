@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
 #
 
-if (NOT CONFIG_DFU_TARGET_MODEM AND NOT CONFIG_DFU_TARGET_MCUBOOT)
+if (NOT CONFIG_DFU_TARGET_MODEM AND NOT CONFIG_DFU_TARGET_MCUBOOT AND NOT CONFIG_DFU_TARGET_UART)
   message(FATAL_ERROR "No dfu supported target selected")
 endif()
 
@@ -19,4 +19,7 @@ zephyr_library_sources_ifdef(CONFIG_DFU_TARGET_MODEM
   )
 zephyr_library_sources_ifdef(CONFIG_DFU_TARGET_MCUBOOT
   src/dfu_target_mcuboot.c
+  )
+zephyr_library_sources_ifdef(CONFIG_DFU_TARGET_UART
+  src/dfu_target_uart.c
   )

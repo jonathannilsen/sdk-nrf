@@ -1,0 +1,22 @@
+/ {
+	chosen {
+		nordic,dfu-uart-controller=&uart1;
+	};
+};
+
+/* uart0 is used for VCOM1. */
+&uart0 {
+	current-speed = <115200>;
+};
+
+/* uart1 is used for nRF9160 communication. */
+&uart1 {
+	compatible = "nordic,nrf-uarte";
+	current-speed = <1000000>;
+	status = "okay";
+	tx-pin = <17>;
+	rx-pin = <20>;
+	rts-pin = <15>;
+	cts-pin = <22>;
+	hw-flow-control;
+};
