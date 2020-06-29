@@ -31,6 +31,12 @@ config DFU_TARGET_MCUBOOT_SAVE_PROGRESS
 	  write progress to flash. In case of power failure or device reset,
 	  the operation can then resume from the latest state.
 
+config DFU_TARGET_UART
+	bool "UART update support"
+	default n
+	help
+	  Enable support for updates sent over UART.
+
 config DFU_TARGET_MODEM
 	bool "Modem update support"
 	default y

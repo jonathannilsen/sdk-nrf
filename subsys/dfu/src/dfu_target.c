@@ -24,6 +24,10 @@ DEF_DFU_TARGET(modem);
 #include "dfu_target_mcuboot.h"
 DEF_DFU_TARGET(mcuboot);
 #endif
+#ifdef CONFIG_DFU_TARGET_UART
+#include "dfu_target_uart.h"
+DEF_DFU_TARGET(uart);
+#endif
 
 #define MIN_SIZE_IDENTIFY_BUF 32
 
@@ -43,11 +47,16 @@ int dfu_target_img_type(const void *const buf, size_t len)
 		return DFU_TARGET_IMAGE_TYPE_MODEM_DELTA;
 	}
 #endif
+#ifdef CONFIG_DFU_TARGET_UART
+	if (dfu_target_uart_identify(buf)) {
+		return DFU_TARGET_IMAGE_TYPE_UART;
+	}	
+#endif
 	if (len < MIN_SIZE_IDENTIFY_BUF) {
 		return -EAGAIN;
 	}
 
-	LOG_ERR("No supported image type found");
+	LOG_ERR("Received image type differs from expected image type");
 	return -ENOTSUP;
 }
 
@@ -63,6 +72,11 @@ int dfu_target_init(int img_type, size_t file_size, dfu_target_callback_t cb)
 #ifdef CONFIG_DFU_TARGET_MODEM
 	if (img_type == DFU_TARGET_IMAGE_TYPE_MODEM_DELTA) {
 		new_target = &dfu_target_modem;
+	}
+#endif
+#ifdef CONFIG_DFU_TARGET_UART
+	if (img_type == DFU_TARGET_IMAGE_TYPE_UART) {
+		new_target = &dfu_target_uart;
 	}
 #endif
 	if (new_target == NULL) {
