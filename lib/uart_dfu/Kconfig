@@ -1,0 +1,56 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "UART DFU Library"
+
+# TODO: Consider whether depends on or select should be used here?
+config UART_DFU_LIBRARY
+	bool "UART DFU library"
+	depends on SERIAL
+	depends on UART_ASYNC_API
+
+config UART_DFU_SYS_INIT
+	bool "Initialize the UART DFU library during system init"
+	default y if BSD_LIBRARY_SYS_INIT
+
+if UART_DFU_SYS_INIT
+
+config UART_DFU_INIT_PRIORITY
+	int "UART DFU library init priority"
+	default 40
+
+endif # UART_DFU_SYS_INIT
+
+config UART_DFU_TARGET_SERVER
+	bool "UART DFU target server"
+	depends on UART_DFU_LIBRARY
+	depends on DFU_TARGET
+
+choice
+	prompt "UART instance for UART DFU"
+	default UART_DFU_UART_1
+	depends on UART_DFU_LIBRARY
+	# TODO: ensure valid options for a given device
+	help
+		Sets the UART instance to use for the UART DFU library 
+		-  UART 0
+		-  UART 1
+		-  UART 2
+	config UART_DFU_UART_0
+		bool "UART 0"
+	config UART_DFU_UART_1
+		bool "UART 1"
+	config UART_DFU_UART_2
+		bool "UART 2"
+endchoice
+
+config UART_DFU_UART_LABEL 
+	string
+	default "UART_0" if UART_DFU_UART_0
+	default "UART_1" if UART_DFU_UART_1
+	default "UART_2" if UART_DFU_UART_2
+
+endmenu

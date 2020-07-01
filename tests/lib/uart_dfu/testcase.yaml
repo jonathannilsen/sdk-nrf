@@ -1,0 +1,4 @@
+tests:
+  lib.lte_uart_dfu:
+    platform_whitelist: qemu_cortex_m3 native_posix
+    tags: dfu uart
