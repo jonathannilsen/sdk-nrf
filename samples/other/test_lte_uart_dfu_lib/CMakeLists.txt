@@ -9,4 +9,7 @@ zephyr_library_include_directories($ENV{ZEPHYR_BASE}/../nrf/subsys/dfu/include)
 
 set(CONF_FILE "prj_${BOARD}.conf")
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE
+	src/main.c
+	src/sfts.c)
+target_include_directories(app PRIVATE include)
