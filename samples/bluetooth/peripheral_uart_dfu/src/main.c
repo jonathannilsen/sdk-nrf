@@ -2,14 +2,26 @@
 #include <sys/crc.h>
 #include <sys/printk.h>
 #include <string.h>
-#include <lte_uart_dfu.h>
+#include <uart_dfu.h>
+#include <uart_dfu_target_server.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/conn.h>
 
 #include "sfts.h"
 
+#define RETURN_ON_ERROR(_err, _msg)		\
+if (_err) {					\
+	printk("%s (err %d)\n", _msg, _err);	\
+	return;					\
+}
+
+
 static u32_t current_crc;
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SFTS_UUID_SERVICE),
+};
 
 int on_sfts_new(struct bt_conn *conn, const u32_t file_size)
 {
@@ -54,35 +66,30 @@ static const struct bt_gatt_stfs_cb stfs_callbacks = {
 	.abort_cb = on_sfts_abort,
 };
 
-static const struct bt_data ad[] = {
-	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SFTS_UUID_SERVICE),
-};
 
 void main(void)
 {
-	int err;
+	printk("Starting Peripheral UART DFU example\n");
 
-	printk("test_lte_uart_dfu_lib sample started\n");
+	RETURN_ON_ERROR(bt_enable(NULL),
+			"Bluetooth enabling failed");
+	RETURN_ON_ERROR(bt_gatt_stfs_init(&stfs_callbacks),
+			"Service initialization failed");
 
-	err = bt_enable(NULL);
-	if (err) {
-		printk("Bluetooth enabling failed (err %d)\n", err);
-		return;
-	}
+	printk("Bluetooth initialized\n");
 
-	err = bt_gatt_stfs_init(&stfs_callbacks);
-	if (err) {
-		printk("SFTS initialization failed (err %d)\n", err);
-		return;
-	}
+	RETURN_ON_ERROR(uart_dfu_init(),
+			"Failed to initialize UART DFU");
+	RETURN_ON_ERROR(uart_dfu_target_server_init(),
+			"Failed to initialize UART DFU server");
+	RETURN_ON_ERROR(uart_dfu_target_server_enable(),
+			"Failed to enable UART DFU server");
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
-	if (err) {
-		printk("Advertising failed to start (err %d)\n", err);
-		return;
-	}
+	printk("UART DFU server enabled\n");
 
-	lte_uart_dfu_init();
-	lte_uart_dfu_start();
+	RETURN_ON_ERROR(bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad,
+					ARRAY_SIZE(ad), NULL, 0),
+			"Advertising failed to start");
+
+	printk("Advertising successfully started\n");
 }
