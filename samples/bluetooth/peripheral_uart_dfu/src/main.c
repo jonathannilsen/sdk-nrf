@@ -4,16 +4,14 @@
 #include <string.h>
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>
-
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/conn.h>
-
 #include "sfts.h"
 
-#define RETURN_ON_ERROR(_err, _msg)		\
-if (_err) {					\
-	printk("%s (err %d)\n", _msg, _err);	\
-	return;					\
+#define RETURN_ON_ERROR(_err, _msg)			\
+if (_err) {									\
+	LOG_ERR("%s (err %d)\n", _msg, _err);	\
+	return;									\
 }
 
 
@@ -22,6 +20,11 @@ static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SFTS_UUID_SERVICE),
 };
+
+static struct uart_dfu_target_server target_server;
+
+LOG_MODULE_REGISTER(peripheral_uart_dfu, LOG_LEVEL_DBG);
+
 
 int on_sfts_new(struct bt_conn *conn, const u32_t file_size)
 {
@@ -78,11 +81,9 @@ void main(void)
 
 	printk("Bluetooth initialized\n");
 
-	RETURN_ON_ERROR(uart_dfu_init(),
-			"Failed to initialize UART DFU");
-	RETURN_ON_ERROR(uart_dfu_target_server_init(),
+	RETURN_ON_ERROR(uart_dfu_target_server_init(&target_server, 0),
 			"Failed to initialize UART DFU server");
-	RETURN_ON_ERROR(uart_dfu_target_server_enable(),
+	RETURN_ON_ERROR(uart_dfu_target_server_enable(&target_server),
 			"Failed to enable UART DFU server");
 
 	printk("UART DFU server enabled\n");

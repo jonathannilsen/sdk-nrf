@@ -29,6 +29,8 @@ static struct k_work		fota_work;
 
 #endif
 
+static struct uart_dfu_target_server target_server;
+
 LOG_MODULE_REGISTER(app, LOG_LEVEL_DBG);
 
 #if 0
@@ -312,23 +314,15 @@ void main(void)
 
 #endif
 	LOG_INF("uart_application_update starting.");
-	LOG_INF("Initializing peripheral UART.");
 
-	err = uart_dfu_init();
-	if (err != 0)
-	{
-		LOG_ERR("Failed to initialize UART DFU.");
-		return;
-	}
-
-	err = uart_dfu_target_server_init();
+	err = uart_dfu_target_server_init(&target_server, 0);
 	if (err != 0)
 	{
 		LOG_ERR("Failed to initialize UART DFU server.");
 		return;
 	}
 
-	err = uart_dfu_target_server_enable();
+	err = uart_dfu_target_server_enable(&target_server);
 	if (err != 0)
 	{
 		LOG_ERR("Failed to enable UART DFU server.");

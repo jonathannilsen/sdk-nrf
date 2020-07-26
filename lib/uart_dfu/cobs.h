@@ -56,6 +56,32 @@ struct cobs_encoder {
     }
 
 
+static inline int cobs_encoder_reset(struct cobs_encoder * encoder)
+{
+    if (encoder == NULL)
+    {
+        return -EINVAL;
+    }
+
+    /* Reset encoder state. */
+    encoder->out_idx = 1;
+    encoder->last_delimiter = 0; 
+
+    return 0;
+}
+
+static inline int cobs_encoder_init(struct cobs_encoder * encoder, u8_t * buf_out)
+{
+    if (encoder == NULL || buf_out == NULL)
+    {
+        return -EINVAL;
+    }
+
+    encoder->buf_out = buf_out;
+
+    return cobs_encoder_reset(encoder);
+}
+
 static inline int cobs_encode(struct cobs_encoder * encoder,
                               const u8_t * const buf_in,
                               size_t length_in)
@@ -91,20 +117,6 @@ static inline int cobs_encode(struct cobs_encoder * encoder,
     return 0;
 }
 
-static inline int cobs_encode_reset(struct cobs_encoder * encoder)
-{
-    if (encoder == NULL)
-    {
-        return -EINVAL;
-    }
-
-    /* Reset encoder state. */
-    encoder->out_idx = 1;
-    encoder->last_delimiter = 0; 
-
-    return 0;
-}
-
 static inline int cobs_encode_finish(struct cobs_encoder * encoder,
                                      size_t * length_out)
 {
@@ -121,10 +133,10 @@ static inline int cobs_encode_finish(struct cobs_encoder * encoder,
     encoder->buf_out[encoder->last_delimiter] = encoder->out_idx;
     *length_out = encoder->out_idx + 1;   
 
-    return cobs_encode_reset(encoder);
+    return cobs_encoder_reset(encoder);
 }
 
-static inline int cobs_decode_reset(struct cobs_decoder * decoder)
+static inline int cobs_decoder_reset(struct cobs_decoder * decoder)
 {
     if (decoder == NULL)
     {
@@ -136,6 +148,17 @@ static inline int cobs_decode_reset(struct cobs_decoder * decoder)
     decoder->state = COBS_DECODER_STATE_WAIT;
 
     return 0;
+}
+
+static inline int cobs_decoder_init(struct cobs_decoder * decoder, u8_t * buf_out)
+{
+    if (decoder == NULL || buf_out == NULL)
+    {
+        return -EINVAL;
+    }
+
+    decoder->buf_out = buf_out;
+    return cobs_decoder_reset(decoder);
 }
 
 static inline int cobs_decode(struct cobs_decoder * decoder,
@@ -190,7 +213,7 @@ static inline int cobs_decode(struct cobs_decoder * decoder,
                         else
                         {
                             /* Invalid frame encoding. */
-                            (void) cobs_decode_reset(decoder);
+                            (void) cobs_decoder_reset(decoder);
                             decoder->state = COBS_DECODER_STATE_INVALID;
                         }
                     }
@@ -211,7 +234,7 @@ static inline int cobs_decode(struct cobs_decoder * decoder,
 
                 if (decoder->out_idx > COBS_MAX_DATA_BYTES)
                 {
-                    (void) cobs_decode_reset(decoder);
+                    (void) cobs_decoder_reset(decoder);
                     decoder->state = COBS_DECODER_STATE_INVALID;
                 }
                 break;
@@ -234,7 +257,7 @@ static inline int cobs_decode(struct cobs_decoder * decoder,
     {
         /* Complete frame decoded. */
         *length_out = decoder->out_idx;
-        (void) cobs_decode_reset(decoder);
+        (void) cobs_decoder_reset(decoder);
 
         return 0;
     }
