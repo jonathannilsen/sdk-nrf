@@ -6,20 +6,12 @@
 #include <dfu/dfu_target.h>
 #include <uart_dfu_target_server.h>
 
-// TODO: Move to config
-#define FRAGMENT_BUFFER_SIZE 4096
 
 /*****************************************************************************
  * Static variables 
  *****************************************************************************/
 
-static struct uart_dfu_server dfu_server;
-static atomic_t dfu_file_size;
-static u8_t fragment_buffer[FRAGMENT_BUFFER_SIZE];
-
-
-/* FIXME: Configurable log level. */
-LOG_MODULE_REGISTER(uart_dfu_target_server, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(uart_dfu_target_server, CONFIG_UART_DFU_TARGET_SERVER_LOG_LEVEL);
 
 
 /*****************************************************************************
@@ -47,9 +39,13 @@ static void dfu_target_callback(enum dfu_target_evt_id evt_id)
     }
 }
 
-static int dfu_server_init_callback(size_t file_size)
+static int dfu_server_init_callback(size_t file_size, void * context)
 {
-    if (atomic_cas(&dfu_file_size, 0, (atomic_t) file_size))
+    struct uart_dfu_target_server * server;
+
+    server = (struct uart_dfu_target_server *) context;
+
+    if (atomic_cas(&server->file_size, 0, (atomic_val_t) file_size))
     {
         LOG_INF("Initialized(file_size=%u)", file_size);
         return 0;
@@ -62,17 +58,18 @@ static int dfu_server_init_callback(size_t file_size)
 }
 
 static int dfu_server_write_callback(const u8_t * const fragment_buf,
-                                     size_t fragment_size)
+                                     size_t fragment_size,
+                                     void * context)
 {
     /* Init, write */
-    int err_code;
-    size_t offset;
+    int err;
+    struct uart_dfu_target_server * server;
+
+    server = (struct uart_dfu_target_server *) context;
 
     LOG_INF("Write(fragment_size=%u)", fragment_size);
 
-    err_code = dfu_target_offset_get(&offset);
-    if ((err_code == 0 && offset == 0) ||
-         err_code == -EACCES)
+    if (atomic_cas(&server->initialized, 0, 1))
     {
         /* First fragment, initialize. */
         int img_type;        
@@ -80,28 +77,35 @@ static int dfu_server_write_callback(const u8_t * const fragment_buf,
         img_type = dfu_target_img_type(fragment_buf, fragment_size);
         if (img_type < 0)
         {
+            LOG_INF("dfu_target_img_type result: %d", img_type);
             return img_type;
         }
 
-        err_code = dfu_target_init(img_type, dfu_file_size, dfu_target_callback);
-        if (err_code < 0)
+        err = dfu_target_init(img_type, server->file_size, dfu_target_callback);
+        if (err < 0)
         {
-            return err_code;
+            LOG_INF("dfu_target_init result: %d", err);
+            return err;
         }
     }
 
-    err_code = dfu_target_write(fragment_buf, fragment_size);
-    return err_code;
+    err = dfu_target_write(fragment_buf, fragment_size);
+
+    LOG_INF("dfu_target_write result: %d", err);
+
+    return err;
 }
 
-static int dfu_server_offset_callback(size_t * offset)
+static int dfu_server_offset_callback(size_t * offset, void * context)
 {
-    int err_code;
+    int err;
+
+    ARG_UNUSED(context);
 
     LOG_INF("Offset()");
 
-    err_code = dfu_target_offset_get(offset);
-    if (err_code == -EACCES)
+    err = dfu_target_offset_get(offset);
+    if (err == -EACCES)
     {
         /* The target is not yet initialized,
            so we just return an offset of 0. */
@@ -110,23 +114,28 @@ static int dfu_server_offset_callback(size_t * offset)
     }
     else
     {
-        return err_code;
+        return err;
     }
 }
 
-static int dfu_server_done_callback(bool successful)
+static int dfu_server_done_callback(bool successful, void * context)
 {
-    int err_code;
+    int err;
+    struct uart_dfu_target_server * server;
+
+    server = (struct uart_dfu_target_server *) context;
 
     LOG_INF("Done(successful=%u)", successful);
 
-    err_code = dfu_target_done(successful);
-    atomic_set(&dfu_file_size, 0);
+    err = dfu_target_done(successful);
 
-    return err_code;
+    (void) atomic_set(&server->file_size, 0);
+    (void) atomic_set(&server->initialized, 0); 
+
+    return err;
 }
 
-static void dfu_server_error_callback(int error)
+static void dfu_server_error_callback(int error, void * context)
 {
     LOG_ERR("Error(error=%d)", error);
     /* TODO: dfu_target_reset or similar? */
@@ -137,41 +146,66 @@ static void dfu_server_error_callback(int error)
  * API functions 
  *****************************************************************************/
 
-int uart_dfu_target_server_init(void)
+int uart_dfu_target_server_init(struct uart_dfu_target_server * server,
+                                size_t inst_idx)
 {
-    int err_code;
+    int err;
     struct uart_dfu_server_callbacks callbacks;
 
-    (void) atomic_set(&dfu_file_size, 0);
-    
+    if (server == NULL)
+    {
+        return -EINVAL;
+    }
+
+    (void) atomic_set(&server->file_size, 0);
+    (void) atomic_set(&server->initialized, 0);
+    server->inst_idx = inst_idx;
+
+    err = uart_dfu_server_init(&server->server,
+                               server->fragment_buffer,
+                               CONFIG_UART_DFU_TARGET_SERVER_MAX_FRAGMENT_SIZE);
+    if (err != 0)
+    {
+        return err;
+    }
+
     callbacks.init_callback = dfu_server_init_callback;
     callbacks.write_callback = dfu_server_write_callback;
     callbacks.offset_callback = dfu_server_offset_callback;
     callbacks.done_callback = dfu_server_done_callback;
     callbacks.error_callback = dfu_server_error_callback;
 
-
-    err_code = uart_dfu_server_set(&dfu_server,
-                                   fragment_buffer,
-                                   FRAGMENT_BUFFER_SIZE,
-                                   &callbacks);
-    return err_code;
+    err = uart_dfu_server_set(inst_idx,
+                              &server->server,
+                              &callbacks,
+                              server);
+    return err;
 }
 
-int uart_dfu_target_server_enable(void)
+int uart_dfu_target_server_enable(struct uart_dfu_target_server * server)
 {
-    int err_code;
+    int err;
 
-    err_code = uart_dfu_server_enable();
+    if (server == NULL)
+    {
+        return -EINVAL;
+    }
 
-    return err_code;
+    err = uart_dfu_server_enable(server->inst_idx);
+
+    return err;
 }
 
-int uart_dfu_target_server_disable(void)
+int uart_dfu_target_server_disable(struct uart_dfu_target_server * server)
 {
-    int err_code;
+    int err;
 
-    err_code = uart_dfu_server_disable();
+    if (server == NULL)
+    {
+        return -EINVAL;
+    }
 
-    return err_code;
+    err = uart_dfu_server_disable(server->inst_idx);
+
+    return err;
 }

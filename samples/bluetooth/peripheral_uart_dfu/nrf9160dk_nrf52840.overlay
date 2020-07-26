@@ -1,3 +1,9 @@
+/ {
+	chosen {
+		uart-dfu,uart-inst-0=&uart1;
+	};
+};
+
 /* uart0 is used for VCOM1. */
 &uart0 {
 	current-speed = <115200>;

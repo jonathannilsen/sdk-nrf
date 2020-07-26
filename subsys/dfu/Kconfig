@@ -34,8 +34,18 @@ config DFU_TARGET_MCUBOOT_SAVE_PROGRESS
 config DFU_TARGET_UART
 	bool "UART update support"
 	default n
+	depends on UART_DFU_LIBRARY
 	help
 	  Enable support for updates sent over UART.
+
+# FIXME: better description
+config DFU_TARGET_UART_INSTANCE_IDX
+	int "Instance index to use for the UART DFU library."
+	depends on DFU_TARGET_UART
+	help
+	  Sets the instance index used to identify the UART instance to use
+	  for UART DFU. See uart_dfu for more information. DFU_TARGET_UART
+	  is only supported on one UART instance.
 
 config DFU_TARGET_MODEM
 	bool "Modem update support"
