@@ -1,6 +1,7 @@
 #include <zephyr.h>
 #include <sys/crc.h>
 #include <sys/printk.h>
+#include <logging/log.h>
 #include <string.h>
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>

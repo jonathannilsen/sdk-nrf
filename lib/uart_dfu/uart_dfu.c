@@ -45,7 +45,7 @@
 #define FLAG_SERVER			1
 
 /* FIXME: Measure correct stack size. */
-#define UART_DFU_STACK_SIZE 			512
+#define UART_DFU_STACK_SIZE 			1024
 
 
 /*****************************************************************************

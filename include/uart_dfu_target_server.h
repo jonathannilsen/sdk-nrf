@@ -1,6 +1,7 @@
 #ifndef UART_DFU_TARGET_SERVER_H__
 #define UART_DFU_TARGET_SERVER_H__
 
+#include <zephyr.h>
 #include <sys/atomic.h>
 #include <uart_dfu.h>
 

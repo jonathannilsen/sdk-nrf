@@ -7,6 +7,8 @@
 #include <uart_dfu_target_server.h>
 
 
+/* TODO: find a way to not do dfu_target calls from the uart_dfu workqueue context. */
+
 /*****************************************************************************
  * Static variables 
  *****************************************************************************/
