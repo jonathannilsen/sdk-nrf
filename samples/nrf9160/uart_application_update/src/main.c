@@ -19,7 +19,8 @@
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>
 
-#define UART_DFU_INST_IDX	0
+#define UART_DFU_PC_INST_IDX	0
+#define UART_DFU_NRF52_INST_IDX	1
 #define LED_PORT		DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
 #define TLS_SEC_TAG 		42
 
@@ -28,7 +29,8 @@ static struct gpio_callback	gpio_cb;
 static atomic_t 		sw_pressed = ATOMIC_INIT(0);
 static struct k_work		fota_work;
 
-static struct uart_dfu_target_server target_server;
+static struct uart_dfu_target_server target_server_pc;
+static struct uart_dfu_target_server target_server_nrf52;
 
 
 /**@brief Recoverable BSD library error. */
@@ -320,13 +322,27 @@ static int application_init(void)
 		return err;
 	}
 
-	err = uart_dfu_target_server_init(&target_server, UART_DFU_INST_IDX);
-	if (err != 0) {
+	err = uart_dfu_target_server_init(&target_server_pc, UART_DFU_PC_INST_IDX);
+	if (err != 0)
+	{
 		return err;
 	}
 
-	err = uart_dfu_target_server_enable(&target_server);
-	if (err != 0) {
+	err = uart_dfu_target_server_enable(&target_server_pc);
+	if (err != 0)
+	{
+		return err;
+	}
+
+	err = uart_dfu_target_server_init(&target_server_nrf52, UART_DFU_NRF52_INST_IDX);
+	if (err != 0)
+	{
+		return err;
+	}
+
+	err = uart_dfu_target_server_enable(&target_server_nrf52);
+	if (err != 0)
+	{
 		return err;
 	}
 
@@ -388,4 +404,6 @@ void main(void)
 	boot_write_img_confirmed();
 	
 	printk("Sample started.\n");
+	printk("- Press Button 1 to download nRF9160 firmware update.\n");
+	printk("- Press Button 2 to download nRF52840 firmware update.\n");
 }

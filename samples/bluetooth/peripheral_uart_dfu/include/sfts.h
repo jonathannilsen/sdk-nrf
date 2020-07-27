@@ -40,6 +40,10 @@ extern "C" {
  *
  *  The application is responsible for validating and storing files
  *  transferred using this service. Therefore, all callbacks are mandatory.
+ *
+ *  @note Client misbehavior will be handled by the service implementation.
+ *  The application can assume that all events for a particular connection
+ *  will arrive in the correct order.
  */
 struct bt_gatt_stfs_cb {
 	/** @brief Callback for new file transfer request.
@@ -85,7 +89,7 @@ struct bt_gatt_stfs_cb {
 	 *  @param crc		CRC of the complete file for an optional check.
 	 *
 	 *  @retval 0		File transfer successful.
-	 *  @retval -EFAULT	CRC error.
+	 *  @retval -ECANCELED	File rejected, e.g. due to CRC error.
 	 */
 	int (*complete_cb)(struct bt_conn *conn, const u32_t crc);
 

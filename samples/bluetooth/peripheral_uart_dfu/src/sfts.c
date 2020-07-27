@@ -152,7 +152,7 @@ static ssize_t handle_op_complete(struct stfs_conn_ctx *conn_ctx,
 	case 0:
 		conn_ctx->transfer_active = false;
 		return len;
-	case -EFAULT:
+	case -ECANCELED:
 		return BT_GATT_ERR(BT_ATT_ERR_WRITE_REQ_REJECTED);
 	default:
 		return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);

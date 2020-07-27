@@ -17,7 +17,7 @@ config DOWNLOAD_NRF91_FILE
 	string "The file name of the nRF91 firmware image."
 
 config DOWNLOAD_NRF52_FILE
-    string "The file name of the nRF52 firmware image."
+	string "The file name of the nRF52 firmware image."
 
 config APPLICATION_VERSION
 	int "Application version"
