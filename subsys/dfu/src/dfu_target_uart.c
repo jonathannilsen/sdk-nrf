@@ -22,13 +22,13 @@ static const u8_t uart_header_magic[] = {
 	0x85, 0xf3, 0xd8, 0x3a
 };
 
-static struct uart_dfu_client dfu_client;
 static dfu_target_callback_t callback = NULL;
 
+static struct uart_dfu_cli cli;
 static atomic_t byte_counter = 0;
-
-static int result_status;
-static size_t result_offset;
+static atomic_t initialized = 0;
+static int status_res = 0;
+static size_t offset_res = 0;
 K_SEM_DEFINE(dfu_target_uart_sem, 0, 1);
 
 LOG_MODULE_REGISTER(dfu_target_uart, CONFIG_DFU_TARGET_LOG_LEVEL);
@@ -38,36 +38,51 @@ LOG_MODULE_REGISTER(dfu_target_uart, CONFIG_DFU_TARGET_LOG_LEVEL);
  * Static functions
  *****************************************************************************/
 
-static void dfu_client_status_callback(int status, void * context)
+static void cli_status_handle(int status, void * context)
 {
 	ARG_UNUSED(context);
 
-	LOG_DBG("dfu_client status(status=%d)", status);
+	LOG_DBG("cli status(status=%d)", status);
 
-	result_status = status;
+	status_res = status;
 	k_sem_give(&dfu_target_uart_sem);
 }
 
-static void dfu_client_offset_callback(size_t offset, void * context)
+static void cli_offset_handle(size_t offset, void * context)
 {
 	ARG_UNUSED(context);
 
-	LOG_DBG("dfu_client offset(offset=%u)", offset);
+	LOG_DBG("cli offset(offset=%u)", offset);
 	
-	result_status = 0;
-	result_offset = offset;
+	status_res = 0;
+	offset_res = offset;
 	k_sem_give(&dfu_target_uart_sem);
 }
 
-static void dfu_client_error_callback(int error, void * context)
+static void cli_error_handle(int error, void * context)
 {
 	ARG_UNUSED(context);
 
-	LOG_DBG("dfu_client error(error=%d)", error);
+	LOG_DBG("cli error(error=%d)", error);
 
 	/* XXX: Differentiate between local and remote errors? */
-	result_status = error;
+	status_res = error;
 	k_sem_give(&dfu_target_uart_sem);	
+}
+
+static int cli_init(void)
+{
+	int err;
+	struct uart_dfu_cli_cb cli_cb;
+	
+	cli_cb.status_cb = cli_status_handle;
+	cli_cb.offset_cb = cli_offset_handle;
+
+	err = uart_dfu_cli_init(&cli, &cli_cb, cli_error_handle, NULL);
+	if (err != 0) {
+		return err;
+	}
+	return uart_dfu_cli_bind(CONFIG_DFU_TARGET_UART_INSTANCE_IDX, &cli);
 }
 
 
@@ -83,105 +98,82 @@ bool dfu_target_uart_identify(const void * const buf)
 int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 {
 	int err;
-	struct uart_dfu_client_callbacks dfu_client_callbacks;
 
 	/* TODO: ensure that this is not happening at a bad time. */
 	k_sem_reset(&dfu_target_uart_sem);
 	atomic_set(&byte_counter, 0);
 
-	dfu_client_callbacks.status_callback = dfu_client_status_callback;
-	dfu_client_callbacks.offset_callback = dfu_client_offset_callback;
-	dfu_client_callbacks.error_callback = dfu_client_error_callback;
-
-	err = uart_dfu_client_init(&dfu_client);
-	if (err != 0)
-	{
-		return err;
+	if (!atomic_set(&initialized, 1)) {
+		err = cli_init();
+		if (err != 0) {
+			atomic_set(&initialized, 0);
+			return err;	
+		}
 	}
 
-	err = uart_dfu_client_set(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
-							  &dfu_client,
-							  &dfu_client_callbacks,
-							  NULL);
-	if (err != 0)
-	{
+	err = uart_dfu_cli_init_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+				     file_size);
+	if (err != 0) {
 		return err;
 	}
-
-	err = uart_dfu_client_init_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX, file_size);
-	if (err != 0)
-	{
-		/* TODO: cleanup first. */
-		(void) uart_dfu_client_clear(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
-		return err;
-	}
-
+	
 	k_sem_take(&dfu_target_uart_sem, K_FOREVER);
-
-	return result_status;
+	return status_res;
 }
 
 int dfu_target_uart_offset_get(size_t * offset)
 {
 	int err;
 
-	err = uart_dfu_client_offset_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
-	if (err != 0)
-	{
+	err = uart_dfu_cli_offset_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
+	if (err != 0) {
 		return err;
 	}
-
 	k_sem_take(&dfu_target_uart_sem, K_FOREVER);
-
-	if (result_status == 0)
-	{
-		*offset = result_offset;
+	if (status_res == 0) {
+		*offset = offset_res;
 	}
-
-	return result_status;
+	return status_res;
 }
 
 int dfu_target_uart_write(const void * const buf, size_t len)
 {
 	int err;
+	int count;
 	u8_t * data;
-	size_t data_size;
+	size_t data_len;
 
 	/* Check that len will not cause an overflow of the counter. */
-	if (len > INT32_MAX)
-	{
+	if (len > INT32_MAX) {
 		return -EINVAL;
 	}
-	
-	if (atomic_add(&byte_counter, (atomic_t) len) < sizeof(uart_header_magic))
-	{
-		/* The magic number is stripped off the header before transmission. */
-		if (len > sizeof(uart_header_magic))
-		{
+
+	count = atomic_add(&byte_counter, (atomic_t) len);
+	if (count < sizeof(uart_header_magic)) {
+		/* The magic number is stripped off the header
+		   before transmission. */
+		if (len > sizeof(uart_header_magic)) {
 			data = &((u8_t *) buf)[sizeof(uart_header_magic)];
-			data_size = len - sizeof(uart_header_magic);
-		}
-		else
-		{
-			/* The entirety of the buffer was stripped off; return without transmitting. */
+			data_len = len - sizeof(uart_header_magic);
+		} else {
+			/* The entirety of the buffer was stripped off;
+			   return without transmitting. */
 			return 0;
 		}
-	}
-	else
-	{
+	} else {
 		data = (u8_t *) buf;
-		data_size = len;
+		data_len = len;
 	}
 
-	err = uart_dfu_client_write_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX, data, data_size);
-	if (err != 0)
-	{
+	err = uart_dfu_cli_write_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+				      data,
+				      data_len);
+	if (err != 0) {
 		return err;
 	}
 
 	k_sem_take(&dfu_target_uart_sem, K_FOREVER);
-
-	return result_status;
+	return status_res;
 }
 
 int dfu_target_uart_done(bool successful)
@@ -189,18 +181,23 @@ int dfu_target_uart_done(bool successful)
 	int err;
 
 	/* TODO: better handling of cases where this is called at weird times.
-			 e.g. call uart_dfu_client_stop() if necessary. */
+			 e.g. call uart_dfu_cli_stop() if necessary. */
 
-	err = uart_dfu_client_done_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX, successful);
-	if (err != 0)
-	{
+	err = uart_dfu_cli_done_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+				     successful);
+	if (err != 0) {
 		goto cleanup;
 	}
 
 	k_sem_take(&dfu_target_uart_sem, K_FOREVER);
-	err = result_status;
+	err = status_res;
 
 cleanup:
-	(void) uart_dfu_client_clear(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
-	return err;
+	err = uart_dfu_cli_stop(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
+	if (err == -EINPROGRESS) {
+		k_sem_take(&dfu_target_uart_sem, K_FOREVER);
+	}
+	k_sem_reset(&dfu_target_uart_sem);
+	atomic_set(&byte_counter, 0);
+	return 0;
 }

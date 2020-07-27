@@ -7,7 +7,7 @@
 
 
 struct uart_dfu_target_server {
-    struct uart_dfu_server server;
+    struct uart_dfu_srv server;
     size_t inst_idx;
     atomic_t file_size;
     atomic_t initialized;

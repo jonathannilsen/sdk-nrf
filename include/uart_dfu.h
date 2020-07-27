@@ -7,115 +7,129 @@
 
 
 /*****************************************************************************
- * Macros
- *****************************************************************************/
+* Macros
+*****************************************************************************/
 
-#define UART_DFU_CLIENT_TX_BUF_SIZE		(255)	// Max COBS bytes 
-#define UART_DFU_SERVER_TX_BUF_SIZE		(7)		// Max server message size
+#define UART_DFU_CLI_TX_BUF_SIZE        (255)   // Max COBS bytes
+#define UART_DFU_SRV_TX_BUF_SIZE        (7)     // Max server message size
 
 
 /*****************************************************************************
- * Structure definitions 
- *****************************************************************************/
+* Structure definitions
+*****************************************************************************/
 
-struct uart_dfu_client_callbacks {
-	void 	(*status_callback)(int status, void * context);
-	void 	(*offset_callback)(size_t offset, void * context);
-	
-	/* TODO: improve when documenting.
-	 * 
-	 * -ECANCELED: Scheduled TX was unable to start
-	 * -ENOTSUP: RX data invalid or not supported
-	 * -EBUSY: RX could not start
-	 * -EINVAL: Invalid value provided in callback
-	 */
-	void 	(*error_callback)(int error, void * context);
+struct uart_dfu_buf_in {
+	const u8_t *buf;
+	size_t idx;
+	size_t size;
 };
 
-struct uart_dfu_client_protocol_state {
-	atomic_t rx_opcode;
+struct uart_dfu_buf_out {
+	u8_t *buf;
+	size_t idx;
+	size_t size;
+	size_t max_size;
+};
+
+/* TODO: figure out where this should be placed. */
+/* TODO: improve when documenting.
+ *
+ * -ECANCELED: Scheduled RX/TX canceled 
+ * -ETIMEDOUT: RX/TX timeout
+ * -ENOTSUP: RX data invalid or not supported
+ * -EINVAL: Invalid value provided in callback
+ */
+typedef void (*uart_dfu_error_t)(int error, void *context);
+
+struct uart_dfu_inst {
+	atomic_t flags;
 	atomic_t tx_state;
-};
-
-struct uart_dfu_client {
-	const u8_t * fragment_buf;
-	size_t 	fragment_idx;
-	size_t  fragment_total_size;
-	u8_t 	tx_data[UART_DFU_CLIENT_TX_BUF_SIZE];
-	size_t 	tx_size;
-	struct uart_dfu_client_protocol_state state;
-};
-
-struct uart_dfu_server_callbacks {
-	int 	(*init_callback)(size_t file_size, void * context);
-	int 	(*write_callback)(const u8_t * const fragment_buf,
-						   	  size_t fragment_size,
-							  void * context);
-	int 	(*offset_callback)(size_t * offset, void * context);
-	int 	(*done_callback)(bool successful, void * context);
-	void 	(*error_callback)(int error, void * context);
-};
-
-struct uart_dfu_server_protocol_state {
 	atomic_t rx_state;
-	atomic_t tx_opcode;	
+	u8_t *tx_buf;
+	size_t tx_size;
+	size_t tx_buf_size;
+	struct k_timer timer;
+	atomic_t timeout;
+	uart_dfu_error_t error_cb;
+	void *mod_ctx;
 };
 
-struct uart_dfu_server {
-	u8_t * 	fragment_buf;
-	size_t	fragment_max_size; 
-	size_t 	fragment_idx;
-	size_t  fragment_total_size;
-	u8_t 	tx_data[UART_DFU_SERVER_TX_BUF_SIZE];
-	size_t 	tx_size;
-	struct uart_dfu_server_protocol_state state;
+struct uart_dfu_cli_cb {
+	void (*status_cb)(int status, void *context);
+	void (*offset_cb)(size_t offset, void *context);
+};
+
+struct uart_dfu_cli {
+	struct uart_dfu_inst inst;
+	struct uart_dfu_buf_in fragment;
+	u8_t buf[UART_DFU_CLI_TX_BUF_SIZE];
+	struct uart_dfu_cli_cb cb;
+	void *ctx;
+};
+
+struct uart_dfu_srv_cb {
+	int (*init_cb)(size_t file_size, void *context);
+	int (*write_cb)(const u8_t *const fragment_buf,
+			size_t fragment_size,
+			void *context);
+	int (*offset_cb)(size_t *offset, void *context);
+	int (*done_cb)(bool successful, void *context);
+};
+
+struct uart_dfu_srv {
+	struct uart_dfu_inst inst;
+	struct uart_dfu_buf_out fragment;
+	u8_t buf[UART_DFU_SRV_TX_BUF_SIZE];
+	struct uart_dfu_srv_cb cb;
+	void *ctx;
 };
 
 
 /*****************************************************************************
- * API functions 
- *****************************************************************************/
+* API functions
+*****************************************************************************/
 
-int uart_dfu_inst_idx_get(const char * uart_label);
+int uart_dfu_idx_get(const char *uart_label);
 
-int uart_dfu_init(size_t inst_idx);
+int uart_dfu_init(size_t idx);
 
-int uart_dfu_uninit(size_t inst_idx);
+int uart_dfu_uninit(size_t idx);
 
-int uart_dfu_client_init(struct uart_dfu_client * dfu_client);
+int uart_dfu_cli_init(struct uart_dfu_cli *client,
+		      struct uart_dfu_cli_cb *callbacks,
+		      uart_dfu_error_t error_cb,
+		      void *context);
 
-int uart_dfu_client_set(size_t inst_idx,
-						struct uart_dfu_client * dfu_client,
-						struct uart_dfu_client_callbacks * callbacks,
-						void * context);
+int uart_dfu_cli_bind(size_t idx, struct uart_dfu_cli *client);
 
-int uart_dfu_client_clear(size_t inst_idx);
+int uart_dfu_cli_unbind(size_t idx);
 
-int uart_dfu_client_init_send(size_t inst_idx, size_t file_size);
+int uart_dfu_cli_init_send(size_t idx, size_t file_size);
 
-int uart_dfu_client_write_send(size_t inst_idx,
-							   const u8_t * const fragment_buf,
-							   size_t fragment_size);
+int uart_dfu_cli_write_send(size_t idx,
+			    const u8_t *const fragment_buf,
+			    size_t fragment_size);
 
-int uart_dfu_client_offset_send(size_t inst_idx);
+int uart_dfu_cli_offset_send(size_t idx);
 
-int uart_dfu_client_done_send(size_t inst_idx, bool successful);
+int uart_dfu_cli_done_send(size_t idx, bool successful);
 
-int uart_dfu_client_stop(size_t inst_idx);
+int uart_dfu_cli_stop(size_t idx);
 
-int uart_dfu_server_init(struct uart_dfu_server * dfu_server,
-						 u8_t * fragment_buf,
-						 size_t fragment_max_size);
+int uart_dfu_srv_init(struct uart_dfu_srv *server,
+		      u8_t *fragment_buf,
+		      size_t fragment_max_size,
+		      struct uart_dfu_srv_cb *callbacks,
+		      uart_dfu_error_t error_cb,
+		      void *context);
 
-int uart_dfu_server_set(size_t inst_idx,
-					    struct uart_dfu_server * server,
-						struct uart_dfu_server_callbacks * callbacks,
-						void * context);
+int uart_dfu_srv_bind(size_t idx, struct uart_dfu_srv *server);
 
-int uart_dfu_server_clear(size_t inst_idx);
+int uart_dfu_srv_unbind(size_t idx);
 
-int uart_dfu_server_enable(size_t inst_idx);
+int uart_dfu_srv_enable(size_t idx);
 
-int uart_dfu_server_disable(size_t inst_idx);
+int uart_dfu_srv_disable(size_t idx);
+
 
 #endif  /* UART_DFU_H__ */

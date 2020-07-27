@@ -153,7 +153,7 @@ int uart_dfu_target_server_init(struct uart_dfu_target_server * server,
                                 size_t inst_idx)
 {
     int err;
-    struct uart_dfu_server_callbacks callbacks;
+    struct uart_dfu_srv_cb callbacks;
 
     if (server == NULL)
     {
@@ -163,25 +163,23 @@ int uart_dfu_target_server_init(struct uart_dfu_target_server * server,
     (void) atomic_set(&server->file_size, 0);
     (void) atomic_set(&server->initialized, 0);
     server->inst_idx = inst_idx;
+    
+    callbacks.init_cb = dfu_server_init_callback;
+    callbacks.write_cb = dfu_server_write_callback;
+    callbacks.offset_cb = dfu_server_offset_callback;
+    callbacks.done_cb = dfu_server_done_callback;
 
-    err = uart_dfu_server_init(&server->server,
-                               server->fragment_buffer,
-                               CONFIG_UART_DFU_TARGET_SERVER_MAX_FRAGMENT_SIZE);
+    err = uart_dfu_srv_init(&server->server,
+                            server->fragment_buffer,
+                            CONFIG_UART_DFU_TARGET_SERVER_MAX_FRAGMENT_SIZE,
+                            &callbacks,
+                            dfu_server_error_callback,
+                            server);
     if (err != 0)
     {
         return err;
     }
-
-    callbacks.init_callback = dfu_server_init_callback;
-    callbacks.write_callback = dfu_server_write_callback;
-    callbacks.offset_callback = dfu_server_offset_callback;
-    callbacks.done_callback = dfu_server_done_callback;
-    callbacks.error_callback = dfu_server_error_callback;
-
-    err = uart_dfu_server_set(inst_idx,
-                              &server->server,
-                              &callbacks,
-                              server);
+    err = uart_dfu_srv_bind(inst_idx, &server->server);
     return err;
 }
 
@@ -194,7 +192,7 @@ int uart_dfu_target_server_enable(struct uart_dfu_target_server * server)
         return -EINVAL;
     }
 
-    err = uart_dfu_server_enable(server->inst_idx);
+    err = uart_dfu_srv_enable(server->inst_idx);
 
     return err;
 }
@@ -208,7 +206,7 @@ int uart_dfu_target_server_disable(struct uart_dfu_target_server * server)
         return -EINVAL;
     }
 
-    err = uart_dfu_server_disable(server->inst_idx);
+    err = uart_dfu_srv_disable(server->inst_idx);
 
     return err;
 }

@@ -11,142 +11,130 @@
 
 
 /*
-	TODO:
-		- Add TX timeout (use driver timeout, can probably be a large one).
-		- Add RX timeout (avoid driver timeout, use other timer)
-		- Make flow control work with PC
-		- Nice logging
-		- Implement missing stuff
-		- Document?
+        TODO:
+		- Review the flow of state variables to check for invalid states
+                - Make flow control work with PC
+                - Nice logging
+		- Some weird stuff happens when looping back from server to
+		  client on the same instance.
 */
 
-
 /*****************************************************************************
- * Macros
- *****************************************************************************/
+* Macros
+*****************************************************************************/
 
-#define UART_DFU_MAX_FRAGMENT_SIZE
+/* Convenience macros */
+#define PDU_HEADER_SIZE			(sizeof(struct uart_dfu_hdr))
+#define PDU_ARG_SIZE			(sizeof(union uart_dfu_args))
+#define PDU_BASE_SIZE			(sizeof(struct uart_dfu_pdu))
 
-#define OFFSET_MAX_ALLOWED				INT32_MAX
-#define OPCODE_NONE						-1
+#define OFFSET_MAX_ALLOWED		INT32_MAX
+#define OPCODE_ANY 			-1
+#define OPCODE_NONE			-2
+#define OPCODE_INVALID			-3
 
-#define RX_WAIT_SIZE 					1
-#define RX_NORMAL_SIZE					(COBS_ENCODED_SIZE(sizeof(struct uart_dfu_message)))
-#define RX_WRITE_SIZE(seg_size)			(COBS_ENCODED_SIZE(sizeof(struct uart_dfu_header) + (seg_size)))
-#define RX_TIMEOUT 						SYS_FOREVER_MS
+#define RX_WAIT_SIZE			1
+#define RX_NORMAL_SIZE			(COBS_ENCODED_SIZE(PDU_BASE_SIZE))
+#define RX_WRITE_SIZE(seg_size)		(COBS_ENCODED_SIZE(PDU_HEADER_SIZE + \
+							   (seg_size)))
+#define RX_FRAME_SIZE(curr_size)	(curr_size + 1)
 
-#define RX_FRAME_SIZE(current_size)		(current_size + 1)
-
-#define RX_BUF_SIZE						(COBS_MAX_BYTES + 1)
-#define CLIENT_TX_BUF_SIZE				(COBS_MAX_BYTES)
-#define SERVER_TX_BUF_SIZE				(COBS_ENCODED_SIZE(sizeof(struct uart_dfu_message)))
-
-#define FLAG_CLIENT			0
-#define FLAG_SERVER			1
+#define RX_TIMEOUT_MARGIN		5000 /* ms */	
+#define TX_TIMEOUT_MARGIN		500 /* ms */			
 
 /* FIXME: Measure correct stack size. */
-#define UART_DFU_STACK_SIZE 			1024
+#define UART_DFU_STACK_SIZE		1024
 
 
 /*****************************************************************************
- * Structure definitions 
- *****************************************************************************/
+* Forward declarations 
+*****************************************************************************/
 
-enum server_rx_state {
-	SERVER_RX_STATE_STOPPED = 0,
-	SERVER_RX_STATE_COMMAND,
-	SERVER_RX_STATE_WRITE_SEQUENCE
+static void rx_timer_expired(struct k_timer *timer);
+
+
+/*****************************************************************************
+* Structure definitions
+*****************************************************************************/
+
+enum inst_type {
+	TYPE_NONE = 0b00,
+	TYPE_CLI = 0b01,
+	TYPE_SRV = 0b10,
+	TYPE_BOTH = 0b11
 };
 
-enum client_tx_state {
-	CLIENT_TX_STATE_STOPPED = 0,
-	CLIENT_TX_STATE_COMMAND,
-	CLIENT_TX_STATE_WRITE_SEQUENCE
-	// UART_DFU_CLIENT_TX_STATE_BREAK	
+enum inst_flags {
+	FLAG_RX_RDY = 0,
+	FLAG_RX_TIMEOUT,
+	FLAG_RX_ABORT,
+	FLAG_TX_RDY,
+	FLAG_TX_ACTIVE,
+	FLAG_TX_TIMEOUT,
+	FLAG_TX_ABORT
 };
 
-enum module_rx_state {
-	RX_STATE_STOPPED = 0,
-	RX_STATE_BUSY
-};
-
-enum module_tx_state {
-	TX_STATE_STOPPED = 0,
-	TX_STATE_BUSY
-};
-
-struct module_protocol_state {
-	atomic_t rx_state;
-	atomic_t tx_state;	
-};
-
-struct rx_buf_info {
+struct rx_rdy_info {
 	struct k_work work;
-	const u8_t * buf;
+	const u8_t *buf;
 	size_t offset;
 	size_t len;
 };
 
-struct tx_buf_info {
+struct tx_dis_info {
 	struct k_work work;
-	const u8_t * buf;
+	const u8_t *buf;
 	size_t len;
 };
 
 struct uart_dfu {
-	const char * const 					uart_label;
-	struct device * 					uart_dev;
+	const char *const label;
+	struct device *dev;
+	u32_t baudrate;	
 
-	struct module_protocol_state 		protocol_state;
+	atomic_t rx;
+	atomic_t tx;
+
+	u8_t rx_buf[COBS_MAX_BYTES];
+	struct cobs_decoder decoder;
+	u8_t rx_decoded_buf[COBS_MAX_DATA_BYTES];
 	
-	u8_t 								rx_data[RX_BUF_SIZE];
-	u8_t 								rx_data_decoded[COBS_MAX_DATA_BYTES];
-	struct cobs_decoder 				rx_data_decoder;
-	
-	atomic_t 							tx_data_flags;
-	struct rx_buf_info 					rx_buf_info;
-	struct k_work						rx_avail_work;
-	struct tx_buf_info					tx_buf_info;
-	struct k_work 						tx_avail_work;
-	struct k_work_q						workqueue;
-	struct z_thread_stack_element * 	stack_area;
+	struct rx_rdy_info rx_rdy;
+	struct k_work rx_dis_work;
+	struct tx_dis_info tx_dis;
 
-	struct uart_dfu_client *	 		client;
-	struct uart_dfu_client_callbacks 	client_callbacks;
-	void * 								client_context;
+	struct k_work_q workqueue;
+	struct z_thread_stack_element *stack_area;
 
-	struct uart_dfu_server * 			server;
-	struct uart_dfu_server_callbacks	server_callbacks;
-	void * 								server_context;
+	struct uart_dfu_cli *cli;
+	struct uart_dfu_srv *srv;
 };
 
 
 /*****************************************************************************
- * Static variables 
- *****************************************************************************/
-
-/* FIXME: reorganize so that this is not necessary. */
-static int uart_dfu_rx_start(struct uart_dfu * device);
+* Static variables
+*****************************************************************************/
 
 /* NOTE: could be done in a more flexible way. */
-#define __UART_DFU_INSTANCE_ENABLED(prop)	\
+#define __UART_DFU_INSTANCE_ENABLED(prop) \
 	DT_HAS_CHOSEN(prop)
 
-#define UART_DFU_INSTANCE_ENABLED(idx)	\
+#define UART_DFU_INSTANCE_ENABLED(idx) \
 	__UART_DFU_INSTANCE_ENABLED(uart_dfu_uart_inst_##idx)
 
-#define __UART_DFU_INSTANCE_SUPPORTED(prop)	\
+#define __UART_DFU_INSTANCE_SUPPORTED(prop) \
 	DT_NODE_HAS_COMPAT_STATUS(DT_CHOSEN(prop), nordic_nrf_uarte, okay)
 
-#define UART_DFU_INSTANCE_SUPPORTED(idx)	\
+#define UART_DFU_INSTANCE_SUPPORTED(idx) \
 	__UART_DFU_INSTANCE_SUPPORTED(uart_dfu_uart_inst_##idx)
 
-#define UART_DFU_INSTANCE_DEF(idx)															\
-	static const char state_##idx##_label[] = DT_LABEL(DT_CHOSEN(uart_dfu_uart_inst_##idx));\
-	K_THREAD_STACK_DEFINE(state_##idx##_stack_area, UART_DFU_STACK_SIZE);					\
-	static struct uart_dfu state_##idx = {													\
-		.uart_label = state_##idx##_label,													\
-		.stack_area = state_##idx##_stack_area												\
+#define UART_DFU_INSTANCE_DEF(idx) \
+	static const char state_##idx##_label[] = \
+		DT_LABEL(DT_CHOSEN(uart_dfu_uart_inst_##idx)); \
+	K_THREAD_STACK_DEFINE(state_##idx##_stack_area, UART_DFU_STACK_SIZE); \
+	static struct uart_dfu state_##idx = { \
+		.label = state_##idx##_label, \
+		.stack_area = state_##idx##_stack_area \
 	}
 
 #if UART_DFU_INSTANCE_ENABLED(0)
@@ -165,7 +153,7 @@ UART_DFU_INSTANCE_DEF(1);
 #endif
 #endif
 
-static struct uart_dfu * 			devices[] = {
+static struct uart_dfu *devices[] = {
 #if UART_DFU_INSTANCE_ENABLED(0)
 	&state_0,
 #else
@@ -178,1116 +166,1394 @@ static struct uart_dfu * 			devices[] = {
 #endif
 };
 
-#define MAX_DEVICE_COUNT 			(sizeof(devices) / sizeof(struct uart_dfu *))
-
 LOG_MODULE_REGISTER(uart_dfu, CONFIG_UART_DFU_LIBRARY_LOG_LEVEL);
 
 
 /*****************************************************************************
- * Static functions 
- *****************************************************************************/
+* Static functions
+*****************************************************************************/
 
 /*
- * Utility functions 
+ * Utility functions
  *****************************************************************************/
 
-static struct uart_dfu * dfu_device_get(size_t inst_idx)
+static struct uart_dfu *dfu_device_get(size_t idx)
 {
-	if (inst_idx > MAX_DEVICE_COUNT)
-	{
+	if (idx < ARRAY_SIZE(devices)) {
+		return devices[idx];
+	} else {
 		return NULL;
 	}
-
-	return devices[inst_idx];
 }
 
-static size_t segment_size_next_calculate(size_t current_idx, size_t total_size)
+static size_t seg_size_next(size_t curr_idx, size_t total_size)
 {
-	size_t remaining_size = total_size - current_idx;
-	return MIN(remaining_size, COBS_MAX_DATA_BYTES - sizeof(struct uart_dfu_header));
+	size_t remaining_size = total_size - curr_idx;
+	return MIN(remaining_size, COBS_MAX_DATA_BYTES - PDU_HEADER_SIZE);
 }
 
-static inline void client_fragment_clear(struct uart_dfu_client * client)
+static size_t seg_size_in_next(struct uart_dfu_buf_in *buf_in)
 {
-	if (client != NULL)
-	{
-		client->fragment_buf = NULL;
-		client->fragment_idx = 0;
-		client->fragment_total_size = 0;
+	return seg_size_next(buf_in->idx, buf_in->size);
+}
+
+static size_t seg_size_out_next(struct uart_dfu_buf_out *buf_out)
+{
+	return seg_size_next(buf_out->idx, buf_out->size);
+}
+
+static void buf_in_cfg(struct uart_dfu_buf_in *buf_in,
+		       const u8_t *buf,
+		       size_t idx,
+		       size_t size)
+{
+	buf_in->buf = buf;
+	buf_in->idx = idx;
+	buf_in->size = size;
+}
+
+static const u8_t *buf_in_read(struct uart_dfu_buf_in *buf_in, size_t size)
+{
+	const u8_t *ptr;
+
+	if (buf_in->idx + size <= buf_in->size) {
+		ptr = &buf_in->buf[buf_in->idx];
+		buf_in->idx += size;
+		return ptr;
+	} else {
+		return NULL;
 	}
 }
 
-static int pdu_encode(u8_t * buf,
-					  size_t * encoded_size,
-					  struct uart_dfu_header * header,
-					  union uart_dfu_args * args,
-					  size_t arg_size)
+static bool buf_in_done(struct uart_dfu_buf_in *buf_in)
 {
-	int err;
-	COBS_ENCODER_DECLARE(encoder, buf);
-
-	/* Encode message header. */
-	err = cobs_encode(&encoder, (u8_t *) header, sizeof(struct uart_dfu_header));
-	if (err != 0)
-	{
-		return err;
-	}
-
-	/* Encode message arguments. */
-	if (arg_size > 0)
-	{
-		err = cobs_encode(&encoder, (u8_t *) args, arg_size);
-		if (err != 0)
-		{
-			return err;
-		}	
-	}
-
-	err = cobs_encode_finish(&encoder, encoded_size);
-	return err;	
+	return buf_in->idx >= buf_in->size;
 }
 
-
-/*
- * General TX helper functions 
- *****************************************************************************/
-
-static int uart_dfu_send_ready(struct uart_dfu * device, atomic_t * send_flag)
+static void buf_out_cfg(struct uart_dfu_buf_out *buf_in,
+		        u8_t *buf,
+		        size_t idx,
+		        size_t size)
 {
-	int err;
-	u8_t * tx_buffer;
-	size_t tx_size;
-	int tx_timeout;
+	buf_in->buf = buf;
+	buf_in->idx = idx;
+	buf_in->size = size;
+}
 
-	if (!atomic_cas(&device->protocol_state.tx_state,
-				    (atomic_t) TX_STATE_STOPPED,
-				    (atomic_t) TX_STATE_BUSY))
-	{
-		/* TX already in progress. */
+static int buf_out_prepare(struct uart_dfu_buf_out *buf_out, size_t size)
+{
+	if (size <= buf_out->max_size) {
+		buf_out->idx = 0;
+		buf_out->size = size;
 		return 0;
-	}
-
-	/* Choose buffer to transmit from.
-	   The server has priority since it can not starve the client. */
-	if (atomic_test_and_clear_bit(&device->tx_data_flags, FLAG_SERVER) &&
-		device->server != NULL)
-	{
-		/* Server is ready to send. */
-		tx_buffer = device->server->tx_data;
-		tx_size = device->server->tx_size;
-		if (send_flag != NULL)
-		{
-			*send_flag = FLAG_SERVER;
-		}
-	}
-	else if (atomic_test_and_clear_bit(&device->tx_data_flags, FLAG_CLIENT) &&
-			 device->client != NULL)
-	{
-		/* Client is ready to send. */
-		tx_buffer = device->client->tx_data;
-		tx_size = device->client->tx_size;
-		if (send_flag != NULL)
-		{
-			*send_flag = FLAG_CLIENT;
-		}
-	}
-	else
-	{
-		atomic_set(&device->protocol_state.tx_state, (atomic_t) TX_STATE_STOPPED);
-		return 0;
-	}
-
-	/* TODO: use tx timeout. */	
-	tx_timeout = SYS_FOREVER_MS;
-	LOG_DBG("%s enabling TX (size=%u, timeout=%d)", device->uart_label, tx_size, tx_timeout);
-	err = uart_tx(device->uart_dev, tx_buffer, tx_size, tx_timeout);
-	if (err != 0)
-	{
-		atomic_set(&device->protocol_state.tx_state, (atomic_t) TX_STATE_STOPPED);
-		LOG_ERR("%s error enabling TX: %d", device->uart_label, err);
-		return -ECANCELED;
-	}
-	else
-	{
-		return (int) tx_size;
-	}
-}
-
-
-/*
- * Client TX helper functions 
- *****************************************************************************/
-
-static int client_send(struct uart_dfu * device,
-					   struct uart_dfu_header * header,
-					   union uart_dfu_args * args,
-					   size_t arg_size)
-{
-	int err;
-
-	if (device->client == NULL ||
-		atomic_get(&device->client->state.tx_state) == (atomic_t) CLIENT_TX_STATE_STOPPED)
-	{
-		return -EINVAL;
-	}
-
-	err = pdu_encode(device->client->tx_data,
-					 &device->client->tx_size,
-					 header,
-					 args,
-					 arg_size);
-	if (err != 0)
-	{
-		return -EINVAL;
-	}
-	atomic_set_bit(&device->tx_data_flags, FLAG_CLIENT);
-	
-	err = uart_dfu_send_ready(device, NULL);
-	return err;
-}
-
-static void client_send_cancel(struct uart_dfu * device)
-{
-	atomic_clear_bit(&device->tx_data_flags, FLAG_CLIENT);
-	device->client->tx_size = 0;
-}
-
-static int client_writec_send(struct uart_dfu * device, size_t * next_segment_size)
-{
-	size_t segment_size;
-	struct uart_dfu_header header;
-	const u8_t * segment_data;
-	
-	/* Constructing the message requires some special logic since this is the only
-	   variable length message type. */
-	memset(&header, 0, sizeof(struct uart_dfu_header));
-	header.opcode = UART_DFU_OPCODE_WRITEC;
-	segment_size = segment_size_next_calculate(device->client->fragment_idx,
-											   device->client->fragment_total_size);
-	*next_segment_size = segment_size;
-	segment_data =  &device->client->fragment_buf[device->client->fragment_idx];
-
-	return client_send(device, &header, (union uart_dfu_args *) segment_data, segment_size);
-}
-
-static int client_write_sequence_cont(struct uart_dfu * device)
-{
-	int err;
-
-	/* TODO: error codes. */
-
-	/* XXX: Should we store the sent segment size instead? */
-	if (device->client->fragment_idx < device->client->fragment_total_size)
-	{
-		/* Continue transmitting the fragment */
-		size_t segment_size;
-
-		err = client_writec_send(device, &segment_size);
-		if (err < 0)
-		{
-			client_fragment_clear(device->client);	
-			atomic_set(&device->client->state.tx_state, (atomic_t) CLIENT_TX_STATE_STOPPED);
-			return -ECANCELED;
-		}
-		else if (device->client->fragment_idx + segment_size >= device->client->fragment_total_size)
-		{
-			/* Final segment - prepare to receive reply. */
-			if (!atomic_cas(&device->client->state.rx_opcode, OPCODE_NONE, UART_DFU_OPCODE_WRITEC))
-			{
-				client_fragment_clear(device->client);
-				return -EBUSY;
-			}
-		}
-	}
-	else
-	{
-		/* Fragment transmission done */
-		client_fragment_clear(device->client);	
-		atomic_set(&device->client->state.tx_state, (atomic_t) CLIENT_TX_STATE_STOPPED);
-	}
-
-	return 0;
-}
-
-
-/*
- * Server TX helper functions 
- *****************************************************************************/
-
-static int server_send(struct uart_dfu * device,
-					   struct uart_dfu_header * header,
-					   union uart_dfu_args * args,
-					   size_t arg_size)
-{
-	int err;
-
-	if (device->server == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (!atomic_cas(&device->server->state.tx_opcode,
-					OPCODE_NONE,
-					(atomic_t) header->opcode))
-	{
-		return -ECANCELED;
-	}
-
-	err = pdu_encode(device->server->tx_data,
-						  &device->server->tx_size,
-						  header,
-						  args,
-						  arg_size);
-	if (err != 0)
-	{
-		(void) atomic_set(&device->server->state.tx_opcode, OPCODE_NONE);
-		return err;
-	}	
-	atomic_set_bit(&device->tx_data_flags, FLAG_SERVER);
-	
-	err = uart_dfu_send_ready(device, NULL);
-	return err;
-}
-
-static int client_rx_handle(struct uart_dfu * device, struct uart_dfu_message * message, size_t len)
-{
-	if (device->client == NULL)
-	{
-		return 0;
-	}
-
-	if (atomic_set(&device->client->state.rx_opcode, OPCODE_NONE) == (atomic_t) message->header.opcode)
-	{
-		switch (message->header.opcode)
-		{
-			case UART_DFU_OPCODE_INIT:
-			case UART_DFU_OPCODE_DONE:
-			{
-				device->client_callbacks.status_callback(message->args.status.data.status,
-														 device->client_context);
-				break;
-			}
-			
-			case UART_DFU_OPCODE_WRITEC:
-			{
-				device->client_callbacks.status_callback(message->args.status.data.status,
-														 device->client_context);
-				break;
-			}
-			case UART_DFU_OPCODE_WRITEH:
-			{
-				if (message->args.status.data.status == 0)
-				{
-					/* Success; start write sequence. */
-					if (atomic_cas(&device->client->state.tx_state,
-								   (atomic_t) CLIENT_TX_STATE_STOPPED,
-								   (atomic_t) CLIENT_TX_STATE_WRITE_SEQUENCE))
-					{
-						/* XXX: handle error here? */
-						return client_write_sequence_cont(device);	
-					}
-					else
-					{
-						return -ECANCELED;
-					}
-				}
-				else
-				{
-					/* Failure; report error. */
-					device->client_callbacks.status_callback(message->args.status.data.status,
-															 device->client_context);
-				}
-				break;
-			}	
-			case UART_DFU_OPCODE_OFFSET:
-			{
-				if (message->args.status.data.status < 0)
-				{
-					device->client_callbacks.status_callback(message->args.status.data.status,
-															 device->client_context);
-				}
-				else
-				{
-					device->client_callbacks.offset_callback(message->args.status.data.offset,
-															 device->client_context);
-				}
-				break;
-			}
-			default:
-			{
-				/* Unknown opcode (this should not happen since the opcode is checked earlier). */
-				return -ENOTSUP;
-			}
-		}
-	}
-	else
-	{
-		/* Unexpected reply. */
-		return -ENOTSUP;
-	}
-	
-	return 0;
-}
-
-static int client_tx_handle(struct uart_dfu * device)
-{
-	int err;
-	size_t tx_size;
-
-	/* FIXME: Get TX size from event? */
-	tx_size = device->client->tx_size;
-	device->client->tx_size = 0;
-
-	if (atomic_get(&device->client->state.tx_state) == (atomic_t) CLIENT_TX_STATE_WRITE_SEQUENCE)	
-	{
-		device->client->fragment_idx += tx_size - COBS_ENCODED_SIZE(sizeof(struct uart_dfu_header));
-		err = client_write_sequence_cont(device);
-		return err;
-	}
-	else
-	{
-		atomic_set(&device->client->state.tx_state, (atomic_t) CLIENT_TX_STATE_STOPPED);	
-	}
-
-	return 0;
-}
-
-static int server_writeh_rx_handle(struct uart_dfu_server * server,
-								   struct uart_dfu_message * message)
-{
-	u32_t fragment_total_size = message->args.writeh.fragment_total_size;
-	
-	if (fragment_total_size <= server->fragment_max_size)
-	{
-		server->fragment_idx = 0;
-		server->fragment_total_size = fragment_total_size;
-		return 0;
-	}
-	else
-	{
-		return -EINVAL;
-	}
-}
-
-static int server_writec_rx_handle(struct uart_dfu_server * server,
-								   struct uart_dfu_message * message,
-								   size_t arg_size)
-{
-	if (server->fragment_idx + arg_size <= server->fragment_total_size)
-	{
-		memcpy(&server->fragment_buf[server->fragment_idx],
-			   message->args.writec.data,
-			   arg_size);
-		server->fragment_idx += arg_size;
-		if (server->fragment_idx >= server->fragment_total_size)
-		{
-			/* Fragment reassembly complete. */
-			return 0;
-		}
-		else
-		{
-			/* Fragment not yet complete. */
-			return -EMSGSIZE;
-		}
-	}
-	else
-	{
-		/* Fragment size too large; reset state and return error. */
-		server->fragment_idx = 0;
-		server->fragment_total_size = 0;
+	} else {
 		return -ENOMEM;
 	}
 }
 
-static inline int server_rx_handle(struct uart_dfu * device,
-								   struct uart_dfu_message * message,
-								   size_t arg_size)
+static int buf_out_write(struct uart_dfu_buf_out *buf_out,
+			 u8_t *data,
+			 size_t size)
 {
-	int err;
-	struct uart_dfu_message reply;	
-
-	if (device->server == NULL)
-	{
-		return 0;
-	}
-
-	memset(&reply.header, 0, sizeof(struct uart_dfu_header));
-	memset(&reply.args.status, 0, sizeof(struct uart_dfu_status_args));
-
-	switch (message->header.opcode)
-	{
-		case UART_DFU_OPCODE_INIT:
-		{
-			reply.args.status.data.status =
-				device->server_callbacks.init_callback(message->args.init.file_size,
-														device->server_context);
-			break;
+	if (buf_out->idx + size <= buf_out->size) {
+		memcpy(&buf_out->buf[buf_out->idx], data, size);
+		buf_out->idx += size;
+		if (buf_out->idx >= buf_out->size) {
+			/* Buffer filled */
+			return 0;
+		} else {
+			/* Buffer not yet filled */
+			return -EMSGSIZE;
 		}
-		case UART_DFU_OPCODE_WRITEH:
-		{
-			/* TODO: consistent error codes. */
-			err = server_writeh_rx_handle(device->server, message);
-			if (err == 0)
-			{
-				(void) atomic_set(&device->server->state.rx_state,
-						          (atomic_t) SERVER_RX_STATE_WRITE_SEQUENCE);
-			}	
-			reply.args.status.data.status = err;
-			break;
-		}
-		case UART_DFU_OPCODE_WRITEC:
-		{
-			err = server_writec_rx_handle(device->server, message, arg_size);
-			if (err == 0)
-			{
-				/* Fragment complete - call server callback. */
-				(void) atomic_set(&device->server->state.rx_state,
-								  (atomic_t) SERVER_RX_STATE_COMMAND);
-				
-				reply.args.status.data.status =
-					device->server_callbacks.write_callback(device->server->fragment_buf,
-													 		 device->server->fragment_total_size,
-															 device->server_context);
-			}
-			else if (err == -EMSGSIZE)
-			{
-				/* Error code signifies that the sequence is not yet done. */
-				return 0;	
-			}
-			else
-			{
-				/* Error; reset RX state. */ 
-				(void) atomic_set(&device->server->state.rx_state,
-								  (atomic_val_t) SERVER_RX_STATE_COMMAND);
-				return -ENOTSUP;
-			}
-			break;
-		}
-		case UART_DFU_OPCODE_OFFSET:
-		{
-			size_t offset;
-			int status;
-			
-			status = device->server_callbacks.offset_callback(&offset, device->server_context);
-
-			if (status == 0)
-			{
-				if (offset <= OFFSET_MAX_ALLOWED)
-				{
-					reply.args.status.data.offset = offset;
-				}
-				else
-				{
-					/* Unsupported offset value. */
-					return -EINVAL;
-				}
-			}
-			else
-			{
-				reply.args.status.data.status = status;
-			}
-			break;
-		}
-		case UART_DFU_OPCODE_DONE:
-		{
-			reply.args.status.data.status =
-				device->server_callbacks.done_callback((bool) message->args.done.success,
-													   device->server_context);
-			break;
-		}
-		default:
-		{
-			return -EINVAL;
-		}
-	}
-
-	reply.header.opcode = message->header.opcode;
-	reply.header.status = 1;
-
-	/* Send reply. */
-	err = server_send(device, &reply.header, &reply.args, sizeof(struct uart_dfu_status_args));
-	if (err <= 0)
-	{
-		LOG_ERR("%s server_send: error %d", device->uart_label, err);
-		return -ECANCELED;
-	}
-
-	return err;
-}
-
-static int server_tx_handle(struct uart_dfu * device)
-{
-	(void) atomic_set(&device->server->state.tx_opcode, OPCODE_NONE);
-	return 0;
-}
-
-static int uart_dfu_rx_parse(struct uart_dfu * device, u8_t * buf, size_t len)
-{
-	int err;
-	struct uart_dfu_message * message;
-	size_t arg_size;
-
-	if (len < sizeof(struct uart_dfu_header))
-	{
-		return -EINVAL;
-	}
-	
-	message = (struct uart_dfu_message *) buf;
-	arg_size = len - sizeof(struct uart_dfu_header);
-
-	/* Validate message length. */
-	switch (message->header.opcode)
-	{
-		case UART_DFU_OPCODE_INIT:
-		case UART_DFU_OPCODE_WRITEH:
-		case UART_DFU_OPCODE_OFFSET:
-		case UART_DFU_OPCODE_DONE:
-		{
-			if (arg_size != UART_DFU_ARGUMENT_SIZE)
-			{
-				/* All these PDUs have the same fixed length. */
-				return -EINVAL;
-			}
-			break;
-		}
-		case UART_DFU_OPCODE_WRITEC:
-		{
-			if (arg_size == 0)
-			{
-				/* Empty segments are disallowed. */
-				return -EINVAL;
-			}
-			break;
-		}
-		default:
-		{
-			/* Unknown opcode. */
-			return -EINVAL;
-		}
-	}
-
-	/* FIXME: error codes below should be valid. */
-
-	if (message->header.status)
-	{
-		err = client_rx_handle(device, message, arg_size);
-		if (err < 0 && device->client_callbacks.error_callback != NULL)
-		{
-			device->client_callbacks.error_callback(err, device->client_context);
-		}
-	}
-	else
-	{
-		err = server_rx_handle(device, message, arg_size);
-		if (err < 0 && device->server_callbacks.error_callback != NULL)
-		{
-			device->server_callbacks.error_callback(err, device->server_context);
-		}
-	}
-
-	return err;
-}
-
-static void server_rx_params_get(struct uart_dfu_server * server, u32_t * rx_size, u32_t * rx_timeout)
-{
-	enum server_rx_state rx_state;
-
-	if (server == NULL)
-	{
-		*rx_size = 0;
-		*rx_timeout = SYS_FOREVER_MS;
-		return;
-	}
-
-	rx_state = (enum server_rx_state) atomic_get(&server->state.rx_state);
-
-	switch (rx_state)
-	{
-		case SERVER_RX_STATE_COMMAND:
-		{
-			*rx_size = RX_NORMAL_SIZE;
-			break;
-		}
-		case SERVER_RX_STATE_WRITE_SEQUENCE:
-		{
-			*rx_size = RX_WRITE_SIZE(segment_size_next_calculate(server->fragment_idx,
-																 server->fragment_total_size));
-			break;
-		}
-		default:
-		{
-			*rx_size = 0;
-			break;
-		}
-	}
-
-	*rx_timeout = RX_TIMEOUT;
-}
-
-static void client_rx_params_get(struct uart_dfu_client * client, u32_t * rx_size, u32_t * rx_timeout)
-{
-	if (client == NULL)
-	{
-		*rx_size = 0;
-		*rx_timeout = SYS_FOREVER_MS;
-		return;
-	}
-
-	if (atomic_get(&client->state.rx_opcode) != OPCODE_NONE)
-	{
-		*rx_size = RX_NORMAL_SIZE;
-	}
-	else
-	{
-		*rx_size = 0;
-	}
-
-	*rx_timeout = RX_TIMEOUT;
-}
-
-static int uart_dfu_rx_next(struct uart_dfu * device, atomic_t * recv_flag)
-{
-	u32_t server_rx_size;
-	u32_t server_rx_timeout;
-	u32_t client_rx_size;
-	u32_t client_rx_timeout;
-	u32_t rx_size;
-	u32_t rx_timeout;
-
-	server_rx_params_get(device->server, &server_rx_size, &server_rx_timeout);
-	client_rx_params_get(device->client, &client_rx_size, &client_rx_timeout);
-
-	if (server_rx_size > 0 && recv_flag != NULL)
-	{
-		atomic_set_bit(recv_flag, FLAG_SERVER);
-	}
-	if (client_rx_size > 0 && recv_flag != NULL)
-	{
-		atomic_set_bit(recv_flag, FLAG_CLIENT);
-	}
-
-	rx_size = MAX(client_rx_size, server_rx_size);
-	rx_timeout = MAX(client_rx_timeout, server_rx_timeout);
-	
-	if (rx_size == 0)
-	{
-		return 0;
-	}
-
-	if (cobs_decode_in_frame(&device->rx_data_decoder))
-	{
-		if (cobs_decode_current_size(&device->rx_data_decoder) < rx_size)
-		{
-			rx_size -= cobs_decode_current_size(&device->rx_data_decoder);
-		}
-		else
-		{
-			rx_size = RX_WAIT_SIZE;
-		}
-	}
-
-	if (atomic_cas(&device->protocol_state.rx_state,
-				   (atomic_val_t) RX_STATE_STOPPED,
-				   (atomic_val_t) RX_STATE_BUSY))
-	{
-		LOG_DBG("%s: enabling RX (size=%u, timeout=%d)", device->uart_label, rx_size, rx_timeout);
-		return uart_rx_enable(device->uart_dev, device->rx_data, rx_size, rx_timeout);
-	}
-	else
-	{
-		return -EBUSY;
+	} else {
+		return -ENOMEM;
 	}
 }
 
-static int uart_dfu_rx_start(struct uart_dfu * device)
+static void buf_out_reset(struct uart_dfu_buf_out *buf_out)
 {
-	if (atomic_get(&device->protocol_state.rx_state) == (atomic_t) RX_STATE_STOPPED)
-	{
-		return uart_dfu_rx_next(device, NULL);
-	}
-	else
-	{
-		return 0;
-	}
+	buf_out->idx = 0;
+	buf_out->size = 0;
 }
 
-static int client_transaction_reserve(struct uart_dfu_client * client, u8_t opcode)
+static inline int byte_duration_get(int baudrate, int bytes)
 {
-	/* Reserve TX. */
-	if (!atomic_cas(&client->state.tx_state,
-					(atomic_t) CLIENT_TX_STATE_STOPPED,
-					(atomic_t) CLIENT_TX_STATE_COMMAND))
-	{
-		// FIXME
-		printk("client tx busy.\n");
-		return -EBUSY;
-	}
-
-	/* Reserve RX. */
-	if (!atomic_cas(&client->state.rx_opcode,
-				    OPCODE_NONE,
-					(atomic_t) opcode))
-	{
-		atomic_set(&client->state.tx_state, (atomic_t) CLIENT_TX_STATE_STOPPED);
-		// FIXME
-		printk("client rx busy.\n");
-		return -EBUSY;
-	}
-
-	return 0;
+	return ceiling_fraction(bytes * 8 * MSEC_PER_SEC, baudrate);
 }
 
-static void client_transaction_cancel(struct uart_dfu_client * client)
+static inline int timeout_get(struct uart_dfu *dev, int bytes, int margin)
 {
-	/* Reset TX/RX state. */
-	atomic_set(&client->state.rx_opcode, OPCODE_NONE);
-	atomic_set(&client->state.tx_state, (atomic_t) CLIENT_TX_STATE_STOPPED);
+	/* XXX: do we need to assert that the baudrate is within bounds? */
+	int baudrate = (int) dev->baudrate;
+	return byte_duration_get(baudrate, bytes) + margin;
 }
 
 
 /*
- * UART event handlers 
+ * Instance helper functions 
  *****************************************************************************/
 
-static void tx_buf_process(struct k_work * work)
+static void inst_error(struct uart_dfu_inst *inst, int err, void *ctx)
+{
+	if (inst->error_cb != NULL) {
+		inst->error_cb(err, ctx);
+	}
+}
+
+static void inst_init(struct uart_dfu_inst *inst,
+		      u8_t *tx_buf,
+		      size_t tx_buf_size,
+		      uart_dfu_error_t error_cb)
+{
+	inst->flags = ATOMIC_INIT(0);
+	(void) atomic_set(&inst->tx_state, OPCODE_NONE);
+	(void) atomic_set(&inst->rx_state, OPCODE_NONE);
+	inst->tx_buf = tx_buf;
+	inst->tx_size = 0;
+	inst->tx_buf_size = tx_buf_size;
+	inst->timeout = ATOMIC_INIT(0);
+	k_timer_init(&inst->timer, rx_timer_expired, NULL);
+	k_timer_user_data_set(&inst->timer, NULL);
+	inst->error_cb = error_cb;
+}
+
+static int inst_pdu_encode(struct uart_dfu_inst *inst,
+		      	   struct uart_dfu_hdr *hdr,
+		      	   union uart_dfu_args *args,
+		      	   size_t arg_size)
 {
 	int err;
-	struct tx_buf_info * info;
-	struct uart_dfu * device;
+	COBS_ENCODER_DECLARE(encoder, inst->tx_buf);
 
-	info = CONTAINER_OF(work, struct tx_buf_info, work);
-	device = CONTAINER_OF(info, struct uart_dfu, tx_buf_info);
+	if (COBS_ENCODED_SIZE(PDU_HEADER_SIZE + arg_size) > inst->tx_buf_size) {
+		return -ENOMEM;
+	}
+
+	/* Encode message header. */
+	err = cobs_encode(&encoder, (u8_t *) hdr, PDU_HEADER_SIZE);
+	if (err != 0) {
+		return err;
+	}
+
+	/* Encode message arguments. */
+	if (arg_size > 0) {
+		err = cobs_encode(&encoder, (u8_t *) args, arg_size);
+		if (err != 0) {
+			return err;
+		}
+	}
+
+	err = cobs_encode_finish(&encoder, &inst->tx_size);
+	return err;
+}
+
+static int inst_abort_check(struct uart_dfu_inst *inst,
+			    int abort_flag,
+			    int timeout_flag)
+{
+	bool aborted = atomic_test_and_clear_bit(&inst->flags, abort_flag);
+	bool timed_out = atomic_test_and_clear_bit(&inst->flags, timeout_flag);
 	
-	if (device->client != NULL && info->buf == device->client->tx_data)
-	{
-		err = client_tx_handle(device);
-		if (err != 0)
-		{
-			LOG_ERR("%s: error handling client TX: %d", device->uart_label, err);
-			if (device->client_callbacks.error_callback != NULL)
-			{
-				device->client_callbacks.error_callback(err, device->client_context);
-			}
-		}
-		
+	if (aborted) {
+		return -ECANCELED;
+	} else if (timed_out) {
+		return -ETIMEDOUT;
+	} else {
+		return 0;
 	}
-	else if (device->server != NULL && info->buf == device->server->tx_data)
-	{
-		err = server_tx_handle(device);
-		if (err != 0)
-		{
-			LOG_ERR("%s: error handling server TX: %d", device->uart_label, err);
-			if (device->server_callbacks.error_callback != NULL)
-			{
-				device->server_callbacks.error_callback(err, device->server_context);
-			}
-		}
+}
+
+static int inst_rx_timeout_get(struct uart_dfu_inst *inst, int bytes)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+	return timeout_get(dev, bytes, RX_TIMEOUT_MARGIN);
+}
+
+static int inst_tx_timeout_get(struct uart_dfu_inst *inst, int bytes)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+	return timeout_get(dev, bytes, TX_TIMEOUT_MARGIN);
+}
+
+static bool inst_tx_rdy(struct uart_dfu_inst *inst)
+{
+	return atomic_test_bit(&inst->flags, FLAG_TX_RDY);
+}
+
+static int inst_tx_start(struct uart_dfu_inst *inst)
+{
+	int err;
+	size_t tx_timeout;
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+
+	tx_timeout = inst_tx_timeout_get(inst, inst->tx_size);
+	LOG_DBG("%s enabling TX (size=%u, timeout=%d)",
+		dev->label,
+		inst->tx_size,
+		tx_timeout);
+
+	atomic_set_bit(&inst->flags, FLAG_TX_ACTIVE);
+	err = uart_tx(dev->dev, inst->tx_buf, inst->tx_size, tx_timeout);
+	if (err != 0) {
+		atomic_clear_bit(&inst->flags, FLAG_TX_ACTIVE);
+		LOG_ERR("%s error enabling TX: %d", dev->label, err);
 	}
-	else
-	{
-		/* Client/server was removed in the middle of TX. */
+	return err;
+}
+
+static void inst_tx_finish(struct uart_dfu_inst *inst, bool timeout)
+{
+	if (timeout) {
+		atomic_set_bit(&inst->flags, FLAG_TX_TIMEOUT);
+	}
+	atomic_clear_bit(&inst->flags, FLAG_TX_RDY);
+	atomic_clear_bit(&inst->flags, FLAG_TX_ACTIVE);
+}
+
+static bool inst_tx_cancel(struct uart_dfu_inst *inst)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+	if (atomic_test_bit(&inst->flags, FLAG_TX_ACTIVE)) {
+		/* Instance is transmitting, cancel */
+		atomic_set_bit(&inst->flags, FLAG_TX_ABORT);
+		(void) uart_tx_abort(dev->dev);
+		return true;
+	} else {
+		/* Instance is not transmitting, clear and return */
+		atomic_clear_bit(&inst->flags, FLAG_TX_RDY);
+		return false;
+	}
+}
+
+static int inst_tx_abort_check(struct uart_dfu_inst *inst)
+{
+	return inst_abort_check(inst, FLAG_TX_ABORT, FLAG_TX_TIMEOUT);
+}
+
+static bool inst_rx_rdy(struct uart_dfu_inst *inst)
+{
+	return atomic_test_bit(&inst->flags, FLAG_RX_RDY);
+}
+
+static int inst_rx_abort_check(struct uart_dfu_inst *inst)
+{
+	return inst_abort_check(inst, FLAG_RX_ABORT, FLAG_RX_TIMEOUT);
+}
+
+static bool inst_rx_cancel(struct uart_dfu_inst *inst)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+	if (atomic_test_bit(&inst->flags, FLAG_RX_RDY)) {
+		/* Instance is receiving, cancel */
+		atomic_set_bit(&inst->flags, FLAG_RX_ABORT);
+		(void) uart_rx_disable(dev->dev);
+		return true;
+	}
+	return false;
+}
+
+static void inst_rx_timeout(struct uart_dfu_inst *inst)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
+	if (atomic_test_bit(&inst->flags, FLAG_RX_RDY)) {
+		(void) atomic_set_bit(&inst->flags, FLAG_RX_TIMEOUT);
+		(void) uart_rx_disable(dev->dev);
+	}
+}
+
+static bool inst_rx_timeout_start(struct uart_dfu_inst *inst)
+{
+	int timeout;
+	timeout = (int) atomic_set(&inst->timeout, 0);
+	if (timeout > 0) {
+		LOG_DBG("Starting timeout: %d ms", timeout);
+		k_timer_start(&inst->timer, K_MSEC(timeout), K_NO_WAIT);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static void inst_rx_timeout_stop(struct uart_dfu_inst *inst)
+{
+	k_timer_stop(&inst->timer);
+	atomic_clear_bit(&inst->flags, FLAG_RX_TIMEOUT);
+}
+
+static int inst_send_reserve(struct uart_dfu_inst *inst,
+			     atomic_val_t tx_old,
+			     atomic_val_t tx_new)
+{
+	if (tx_old == OPCODE_ANY && !inst_tx_rdy(inst)) {
+		(void) atomic_set(&inst->tx_state, tx_new);
+		return 0;
+	} else if (!inst_tx_rdy(inst) &&
+		   atomic_cas(&inst->tx_state, tx_old, tx_new)) {
+		return 0;
+	} else {
+		return -EBUSY;
+	}
+}
+
+static void inst_send_unreserve(struct uart_dfu_inst *inst)
+{
+	(void) atomic_set(&inst->tx_state, OPCODE_NONE);
+}
+
+static int inst_send_prepare(struct uart_dfu_inst *inst,
+			     struct uart_dfu_hdr *hdr,
+		    	     union uart_dfu_args *args,
+		    	     size_t arg_size)
+{
+	int err;
+
+	err = inst_pdu_encode(inst, hdr, args, arg_size);
+	if (err != 0) {
+		return -EINVAL;
+	}
+	atomic_set_bit(&inst->flags, FLAG_TX_RDY);
+	return 0;
+}
+
+static int inst_send_cond(struct uart_dfu_inst *inst,
+			  int opcode_from,
+			  struct uart_dfu_hdr *hdr,
+			  union uart_dfu_args *args,
+			  size_t arg_size)
+{
+	int err;
+
+	err = inst_send_reserve(inst, opcode_from, hdr->opcode);
+	if (err != 0) {
+		return -ECANCELED;
+	}
+	
+	err = inst_send_prepare(inst, hdr, args, arg_size);
+	if (err != 0) {
+		inst_send_unreserve(inst);
+		return -ECANCELED;
+	}
+
+	return 0;
+}
+
+static int inst_send(struct uart_dfu_inst *inst,
+		     struct uart_dfu_hdr *hdr,
+		     union uart_dfu_args *args,
+		     size_t arg_size)
+{
+	return inst_send_cond(inst, OPCODE_ANY, hdr, args, arg_size);
+}
+
+static int inst_send_finish(struct uart_dfu_inst *inst, int opcode_to)
+{
+	return atomic_set(&inst->tx_state, opcode_to);
+}
+
+static bool inst_send_active(struct uart_dfu_inst *inst)
+{
+	return atomic_get(&inst->tx_state) != OPCODE_NONE;
+}
+
+static int inst_send_state_get(struct uart_dfu_inst *inst)
+{
+	return atomic_get(&inst->tx_state);
+}
+
+static int inst_send_cancel(struct uart_dfu_inst *inst)
+{
+	if (!inst_tx_cancel(inst)) {
+		inst_send_finish(inst, OPCODE_NONE);
+		return 0;
+	}
+	return -EINPROGRESS;
+}
+
+static int inst_recv_cond(struct uart_dfu_inst *inst, int rx_old, int rx_new)
+{
+	if (rx_old == OPCODE_ANY) {
+		/* Unconditional recv */
+		atomic_set(&inst->rx_state, rx_new);
+		atomic_set_bit(&inst->flags, FLAG_RX_RDY);
+		return 0;
+	} else if (atomic_cas(&inst->rx_state, rx_old, rx_new)) {
+		/* Conditional recv success */
+		atomic_set_bit(&inst->flags, FLAG_RX_RDY);
+		return 0;
+	} else {
+		/* Conditional recv failure */
+		return -ECANCELED;
+	}
+}
+
+static void inst_recv(struct uart_dfu_inst *inst, int rx_new)
+{
+	(void) inst_recv_cond(inst, OPCODE_ANY, rx_new);
+}
+
+static int inst_recv_finish_cond(struct uart_dfu_inst *inst,
+				 int rx_old,
+				 int rx_new)
+{
+	bool success;
+	if (rx_old == OPCODE_ANY) {
+		/* Unconditional recv finish */
+		(void) atomic_set(&inst->rx_state, rx_new);
+		success = true;
+	} else {
+		success = atomic_cas(&inst->rx_state, rx_old, rx_new);
+	}
+	if (success) {
+		if (rx_new == OPCODE_NONE) {
+			atomic_clear_bit(&inst->flags, FLAG_RX_RDY);
+		}
+		inst_rx_timeout_stop(inst);	
+		return 0;
+	} else {
+		return -ENOTSUP;
+	}
+}
+
+static void inst_recv_finish(struct uart_dfu_inst *inst, int rx_new)
+{
+	(void) inst_recv_finish_cond(inst, OPCODE_ANY, rx_new);
+}
+
+static bool inst_recv_active(struct uart_dfu_inst *inst)
+{
+	return atomic_get(&inst->rx_state) != OPCODE_NONE;
+}
+
+static int inst_recv_cancel(struct uart_dfu_inst *inst)
+{
+	if (!inst_rx_cancel(inst)) {
+		(void) inst_recv_finish(inst, OPCODE_NONE);
+		return 0;
+	}
+	return -EINPROGRESS;
+}
+
+static void inst_recv_timeout_set(struct uart_dfu_inst *inst, int timeout)
+{
+	(void) atomic_set(&inst->timeout, timeout);
+}
+
+static void inst_recv_timeout_clr(struct uart_dfu_inst *inst)
+{
+	k_timer_stop(&inst->timer);
+	atomic_clear_bit(&inst->flags, FLAG_RX_TIMEOUT);
+}
+
+static int inst_active_abort(struct uart_dfu_inst *inst)
+{
+	bool done = true; 
+	if (inst_send_active(inst)) {
+		done = done && inst_send_cancel(inst);
+	}
+	if (inst_recv_active(inst)) {
+		done = done && inst_recv_cancel(inst);
+	}
+	if (done) {
+		return 0;
+	} else {
+		return -EINPROGRESS;
+	}
+}
+
+
+
+/*
+ * Client instance helper functions 
+ *****************************************************************************/
+
+static u32_t cli_rx_size_get(struct uart_dfu_cli *cli)
+{
+	if (cli == NULL || !inst_rx_rdy(&cli->inst)) {
+		return 0;
+	}
+
+	return RX_NORMAL_SIZE;
+}
+
+static void cli_rsp_timeout_set(struct uart_dfu_cli *cli)
+{
+	int timeout;
+	if (inst_recv_active(&cli->inst)) {
+		timeout = inst_rx_timeout_get(&cli->inst, RX_NORMAL_SIZE);
+		inst_recv_timeout_set(&cli->inst, timeout);
+	}
+}
+
+static int cli_writec_send(struct uart_dfu_cli *cli, bool *final)
+{
+	size_t seg_size;
+	struct uart_dfu_hdr hdr;
+	const u8_t *seg_data;
+
+	memset(&hdr, 0, PDU_HEADER_SIZE);
+	hdr.opcode = UART_DFU_OPCODE_WRITEC;
+	seg_size = seg_size_in_next(&cli->fragment);
+	seg_data =  buf_in_read(&cli->fragment, seg_size);
+	*final = buf_in_done(&cli->fragment);
+	if (seg_data == NULL) {
+		/* TODO: state? */
+		return -ECANCELED;
+	}
+	return inst_send(&cli->inst,
+			 &hdr,
+			 (union uart_dfu_args *) seg_data,
+			 seg_size);
+}
+
+static int cli_write_seq_cont(struct uart_dfu_cli *cli)
+{
+	int err;
+	bool final = false;
+
+	if (buf_in_done(&cli->fragment)) {
+		/* Fragment transmission done */
+		buf_in_cfg(&cli->fragment, NULL, 0, 0);
+		inst_send_unreserve(&cli->inst);
+		cli_rsp_timeout_set(cli);	
+		return 0;
+	}
+	
+	/* Continue transmitting the fragment */
+	err = cli_writec_send(cli, &final);
+	if (err < 0) {
+		buf_in_cfg(&cli->fragment, NULL, 0, 0);
+		return -ECANCELED;
+	}
+	if (final) {
+		/* Final segment - prepare to receive reply. */
+		inst_recv(&cli->inst, UART_DFU_OPCODE_WRITEC);
+	}
+	return 0;
+}
+
+static void cli_recv_status_handle(struct uart_dfu_cli *cli,
+				   struct uart_dfu_pdu *pdu)
+{
+	cli->cb.status_cb(pdu->args.status.data.status, cli->ctx);
+}
+
+static void cli_recv_writeh_handle(struct uart_dfu_cli *cli,
+				  struct uart_dfu_pdu *pdu)
+{
+	int err;
+	if (pdu->args.status.data.status == 0) {
+		err = cli_write_seq_cont(cli);
+		if (err != 0) {
+			inst_error(&cli->inst, err, cli->ctx);
+		}
+	} else {
+		cli->cb.status_cb(pdu->args.status.data.status, cli->ctx);
+	}
+}
+
+static void cli_recv_offset_handle(struct uart_dfu_cli *cli,
+				   struct uart_dfu_pdu *pdu)
+{
+	if (pdu->args.status.data.status < 0) {
+		cli->cb.status_cb(pdu->args.status.data.status, cli->ctx);
+	} else {
+		cli->cb.offset_cb(pdu->args.status.data.offset, cli->ctx);
+	}
+}
+
+static void cli_recv_handle(struct uart_dfu *dev,
+			    struct uart_dfu_pdu *pdu,
+			    size_t len)
+{
+	int err;
+	struct uart_dfu_cli *cli = dev->cli;
+	int opcode = (int) pdu->hdr.opcode;
+
+	ARG_UNUSED(len);
+
+	if (cli == NULL) {
+		return;
+	}
+
+	err = inst_recv_finish_cond(&cli->inst, opcode, OPCODE_NONE);
+	if (err != 0) {
+		/* Did not receive expected opcode. */
+		return;
+	}
+	
+	switch (opcode) {
+	case UART_DFU_OPCODE_INIT:
+	case UART_DFU_OPCODE_DONE:
+	case UART_DFU_OPCODE_WRITEC:
+		cli_recv_status_handle(cli, pdu);
+		break;
+	case UART_DFU_OPCODE_WRITEH:
+		cli_recv_writeh_handle(cli, pdu);
+		break;
+	case UART_DFU_OPCODE_OFFSET:
+		cli_recv_offset_handle(cli, pdu);
+		break;
+	default:
+		/* Unknown opcode (this should not happen since the opcode is
+		   checked earlier). */
 		return;
 	}
 }
 
-static void tx_avail_process(struct k_work * work)
+static void cli_recv_abort_handle(struct uart_dfu *dev, int err)
+{
+	struct uart_dfu_cli *cli = dev->cli;
+	inst_recv_finish(&cli->inst, OPCODE_NONE);
+	inst_error(&cli->inst, err, cli->ctx);
+}
+
+static void cli_send_handle(struct uart_dfu *dev)
 {
 	int err;
-	struct uart_dfu * device;
-	atomic_t send_flag;
+	struct uart_dfu_cli *cli = dev->cli;
+	int opcode;
 
-	device = CONTAINER_OF(work, struct uart_dfu, tx_avail_work);
-	
-	/* XXX: Is there a problem in updating this state here? */
-	atomic_set(&device->protocol_state.tx_state, (atomic_t) TX_STATE_STOPPED);
-	
-	err = uart_dfu_send_ready(device, &send_flag);
-	if (err < 0)
-	{
-		LOG_ERR("%s: error %d while trying to send data.", device->uart_label, err);
-		if (atomic_test_bit(&send_flag, FLAG_CLIENT) &&
-			device->client_callbacks.error_callback != NULL)
-		{
-			device->client_callbacks.error_callback(err, device->client_context);
-		}
-		else if (atomic_test_bit(&send_flag, FLAG_SERVER) &&
-				 device->server_callbacks.error_callback != NULL)
-		{
-			device->server_callbacks.error_callback(err, device->server_context);
-		}
+	opcode = inst_send_state_get(&cli->inst);
+	if (opcode == UART_DFU_OPCODE_WRITEH) {
+		(void) inst_send_finish(&cli->inst, UART_DFU_OPCODE_WRITEC);
 	}
-
-	if (device->client != NULL && atomic_get(&device->client->state.rx_opcode) != OPCODE_NONE)
-	{
-		/* XXX: return error? */
-		(void) uart_dfu_rx_start(device);
+	if (opcode == UART_DFU_OPCODE_WRITEC) {
+		err = cli_write_seq_cont(cli);
+		if (err != 0) {
+			/* NOTE: cli_write_seq_cont clears the TX
+						state in case of errors. */
+			inst_error(&cli->inst, err, cli->ctx);
+			return;
+		}
+	} else {
+		(void) inst_send_finish(&cli->inst, OPCODE_NONE);
+		cli_rsp_timeout_set(cli);	
 	}
 }
 
-static void uart_tx_done_handle(struct uart_dfu * device, struct uart_event_tx * evt)
+static void cli_send_abort_handle(struct uart_dfu *dev, int err)
 {
-	LOG_DBG("%s: TX (len=%u)", device->uart_label, evt->len);
-
-	device->tx_buf_info.buf = evt->buf;
-	device->tx_buf_info.len = evt->len;
-
-	k_work_submit_to_queue(&device->workqueue, &device->tx_buf_info.work);
-	k_work_submit_to_queue(&device->workqueue, &device->tx_avail_work);
+	struct uart_dfu_cli *cli = dev->cli;
+	inst_send_finish(&cli->inst, OPCODE_NONE);
+	inst_error(&cli->inst, err, cli->ctx);
 }
 
-static void uart_tx_aborted_handle(struct uart_dfu * device, struct uart_event_tx * evt)
+
+/*
+ * Server instance helper functions 
+ *****************************************************************************/
+
+static u32_t srv_rx_size_get(struct uart_dfu_srv *srv)
 {
-	atomic_set(&device->protocol_state.tx_state, (atomic_t) TX_STATE_STOPPED);
-	k_work_submit_to_queue(&device->workqueue, &device->tx_avail_work);
-	
-	/* TODO: Possibly start processing work. Do once TX timeout is added. */
+	atomic_val_t opcode;
+
+	if (srv == NULL || !inst_rx_rdy(&srv->inst)) {
+		return 0;
+	}
+
+	opcode = atomic_get(&srv->inst.rx_state);
+	switch (opcode) {
+	case UART_DFU_OPCODE_WRITEC: {
+		size_t seg_size = seg_size_out_next(&srv->fragment);
+		return (u32_t) RX_WRITE_SIZE(seg_size);
+	}
+	default: {
+		return RX_NORMAL_SIZE;
+	}
+	}
 }
 
-static void rx_buf_process(struct k_work * work)
+static void srv_seg_timeout_set(struct uart_dfu_srv *srv)
+{
+	size_t seg_size = seg_size_out_next(&srv->fragment);
+	int timeout = inst_rx_timeout_get(&srv->inst, RX_WRITE_SIZE(seg_size));
+	inst_recv_timeout_set(&srv->inst, timeout);
+}
+
+static int srv_recv_init_handle(struct uart_dfu_srv *srv,
+				struct uart_dfu_pdu *pdu,
+				struct uart_dfu_pdu *rsp)
+{
+	inst_recv_finish(&srv->inst, OPCODE_ANY);
+	int status = srv->cb.init_cb(pdu->args.init.file_size, srv->ctx);
+	rsp->args.status.data.status = status;
+	return 0;
+}
+
+static int srv_recv_writeh_handle(struct uart_dfu_srv *srv,
+				  struct uart_dfu_pdu *pdu,
+				  struct uart_dfu_pdu *rsp)
 {
 	int err;
-	struct rx_buf_info * info;
-	struct uart_dfu * device;
+	u32_t fragment_size = pdu->args.writeh.fragment_size;
+
+	inst_recv_finish(&srv->inst, UART_DFU_OPCODE_WRITEC);
+	err = buf_out_prepare(&srv->fragment, fragment_size);
+	if (err == 0) {
+		srv_seg_timeout_set(srv);
+	} else if (err == -ENOMEM) {
+		buf_out_reset(&srv->fragment);
+	}
+	rsp->args.status.data.status = err;
+	return 0;
+}
+
+static int srv_recv_writec_handle(struct uart_dfu_srv *srv,
+				  struct uart_dfu_pdu *pdu,
+				  size_t len,
+				  struct uart_dfu_pdu *rsp)
+{
+	int err;
+	size_t data_len = len - PDU_HEADER_SIZE;
+
+
+	err = buf_out_write(&srv->fragment, pdu->args.writec.data, data_len);
+	if (err == 0) {
+		/* Fragment done. */
+		inst_recv_finish(&srv->inst, OPCODE_ANY);
+		int status = srv->cb.write_cb(srv->fragment.buf,
+					      srv->fragment.size,
+					      srv->ctx);
+		rsp->args.status.data.status = status;
+		return 0;
+	} else if (err == -EMSGSIZE) {
+		/* Fragment not yet done. */
+		inst_recv_finish(&srv->inst, UART_DFU_OPCODE_WRITEC);
+		srv_seg_timeout_set(srv);
+	} else if (err == -ENOMEM) {
+		/* Fragment size too large. */
+		inst_recv_finish(&srv->inst, OPCODE_ANY);
+		buf_out_reset(&srv->fragment);
+	}
+	return -ENOENT;
+}
+
+static int srv_recv_offset_handle(struct uart_dfu_srv *srv,
+				  struct uart_dfu_pdu *rsp)
+{
 	size_t offset;
-	size_t bound;
-	size_t decoded_size;
-
-	info = CONTAINER_OF(work, struct rx_buf_info, work);
-	device = CONTAINER_OF(info, struct uart_dfu, rx_buf_info);
 	
-	offset = info->offset;
-	bound = offset + info->len;
-
-	LOG_DBG("%s: RX process (offset=%u, len=%u)", device->uart_label, info->offset, info->len);
-
-	while (offset < bound)
-	{
-		err = cobs_decode(&device->rx_data_decoder,
-						  &decoded_size,
-						  &info->buf[info->offset],
-						  &offset,
-						  bound - offset);
-		if (err == -EMSGSIZE)
-		{
-			LOG_DBG("%s: message not yet complete.", device->uart_label);
+	(void) inst_recv_finish(&srv->inst, OPCODE_ANY);
+	int status = srv->cb.offset_cb(&offset, srv->ctx);
+	if (status == 0) {
+		if (offset <= OFFSET_MAX_ALLOWED) {
+			rsp->args.status.data.offset = offset;
+		} else {
+			inst_error(&srv->inst, -EINVAL, srv->ctx);
+			return -ENOENT;
 		}
-		if (err == 0)
-		{
-			err = uart_dfu_rx_parse(device, device->rx_data_decoded, decoded_size);
-			if (err >= 0)
-			{
-				LOG_DBG("%s: successfully parsed PDU.", device->uart_label);
-			}
-			else
-			{
-				LOG_HEXDUMP_ERR(&info->buf[info->offset], info->len, "Encoded data (full):");
-				LOG_HEXDUMP_ERR(device->rx_data_decoded, decoded_size, "Decoded data:");
-			}
-		}
-		else	
-		{
-			LOG_ERR("%s: error %d while decoding data.", device->uart_label, err);
-			if (device->server != NULL && device->server_callbacks.error_callback != NULL)
-			{
-				device->server_callbacks.error_callback(-ENOTSUP, device->server_context);
-			}
-			if (device->client != NULL && device->client_callbacks.error_callback != NULL)
-			{
-				device->client_callbacks.error_callback(-ENOTSUP, device->client_context);
-			}
-		}
+	} else {
+		rsp->args.status.data.status = status;
 	}
-
-	LOG_DBG("%s: finished processing received data.", device->uart_label);
+	return 0;
 }
 
-static void rx_avail_process(struct k_work * work)
+static int srv_recv_done_handle(struct uart_dfu_srv *srv,
+				struct uart_dfu_pdu *pdu,
+				struct uart_dfu_pdu *rsp)
+{
+	(void) inst_recv_finish(&srv->inst, OPCODE_ANY);
+	int status = srv->cb.done_cb((bool) pdu->args.done.success, srv->ctx);
+	rsp->args.status.data.status = status;
+	return 0;
+}
+
+static void srv_recv_handle(struct uart_dfu *dev,
+			   struct uart_dfu_pdu *pdu,
+			   size_t len)
 {
 	int err;
-	struct uart_dfu * device;
-	atomic_t recv_flags;
+	struct uart_dfu_srv *srv = dev->srv;
+	struct uart_dfu_pdu rsp;
 
-	device = CONTAINER_OF(work, struct uart_dfu, rx_avail_work);
+	if (srv == NULL) {
+		return;
+	}
 
-	/* XXX: Is there a problem in updating this state here? */
-	atomic_set(&device->protocol_state.rx_state, (atomic_t) RX_STATE_STOPPED);
-	
-	/* Resume reception if applicable. */
-	err = uart_dfu_rx_next(device, &recv_flags);
-	if (err != 0 && err != -EINVAL)
-	{
-		LOG_ERR("%s: error %d while starting RX.", device->uart_label, err);
+	memset(&rsp.hdr, 0, PDU_HEADER_SIZE);
+	memset(&rsp.args.status, 0, sizeof(rsp.args.status));
 
-		/* FIXME: what happens to the client/server RX state? */
-		if (atomic_test_bit(&recv_flags, FLAG_SERVER) &&
-			device->server_callbacks.error_callback != NULL)
-		{
-			device->server_callbacks.error_callback(-EBUSY, device->server_context);
-		}
-		if (atomic_test_bit(&recv_flags, FLAG_CLIENT) &&
-			device->client_callbacks.error_callback != NULL)
-		{
-			device->client_callbacks.error_callback(-EBUSY, device->client_context);
+	switch (pdu->hdr.opcode) {
+	case UART_DFU_OPCODE_INIT:
+		err = srv_recv_init_handle(srv, pdu, &rsp);
+		break;
+	case UART_DFU_OPCODE_WRITEH:
+		err = srv_recv_writeh_handle(srv, pdu, &rsp);
+		break;
+	case UART_DFU_OPCODE_WRITEC:
+		err = srv_recv_writec_handle(srv, pdu, len, &rsp);
+		break;
+	case UART_DFU_OPCODE_OFFSET:
+		err = srv_recv_offset_handle(srv, &rsp);
+		break;
+	case UART_DFU_OPCODE_DONE:
+		err = srv_recv_done_handle(srv, pdu, &rsp);
+		break;
+	default:
+		return;
+	}
+
+	if (err == 0) {
+		rsp.hdr.opcode = pdu->hdr.opcode;
+		rsp.hdr.status = 1;
+
+		/* Send reply. */
+		err = inst_send(&srv->inst,
+				&rsp.hdr,
+				&rsp.args,
+				sizeof(rsp.args.status));
+		if (err != 0) {
+			LOG_ERR("%s srv_send: error %d", dev->label, err);
+			inst_error(&srv->inst, -ECANCELED, srv->ctx);
 		}	
 	}
 }
 
-static void uart_rx_rdy_handle(struct uart_dfu * device, struct uart_event_rx * evt)
+static void srv_recv_abort_handle(struct uart_dfu *dev, int err)
 {
-	LOG_DBG("%s: RX (offset=%u, len=%u)", device->uart_label, evt->offset, evt->len);
-
-	device->rx_buf_info.buf = evt->buf;
-	device->rx_buf_info.offset = evt->offset;
-	device->rx_buf_info.len = evt->len;
-
-	k_work_submit_to_queue(&device->workqueue, &device->rx_buf_info.work);
+	struct uart_dfu_srv *srv = dev->srv;
+	if (err == -ECANCELED) {
+		/* Abort - RX should stop */
+		inst_recv_finish(&srv->inst, OPCODE_NONE);
+	} else {
+		/* Timeout - RX should continue */
+		inst_recv_finish(&srv->inst, OPCODE_ANY);
+	}
+	inst_error(&srv->inst, err, srv->ctx);
 }
 
-static void uart_rx_buf_request_handle(struct uart_dfu * device)
+static void srv_send_handle(struct uart_dfu *dev)
 {
-	/* Double buffering is not used for now, so no implementation is needed. */
+	struct uart_dfu_srv *srv = dev->srv;
+	inst_send_finish(&srv->inst, OPCODE_NONE);
 }
 
-static void uart_rx_buf_released_handle(struct uart_dfu * device, struct uart_event_rx_buf * evt)
+static void srv_send_abort_handle(struct uart_dfu *dev, int err)
 {
-	/* Double buffering is not used for now, so no implementation is needed. */
+	struct uart_dfu_srv *srv = dev->srv;
+	inst_send_finish(&srv->inst, OPCODE_NONE);
+	inst_error(&srv->inst, err, srv->ctx);
 }
 
-static void uart_rx_disabled_handle(struct uart_dfu * device)
+
+/*
+ * General helper functions 
+ *****************************************************************************/
+
+static bool pdu_validate(u8_t *buf, size_t len)
 {
-	k_work_submit_to_queue(&device->workqueue, &device->rx_avail_work);
-}
+	struct uart_dfu_pdu *pdu;
+	size_t arg_size;
 
-static void uart_rx_stopped_handle(struct uart_dfu * device, struct uart_event_rx_stop * evt)
-{
-	/* TODO */
-}
+	if (len < PDU_HEADER_SIZE) {
+		return NULL;
+	}
 
-static void uart_async_cb(struct uart_event * evt, void * user_data)
-{
-	struct uart_dfu * device;
+	pdu = (struct uart_dfu_pdu *) buf;
+	arg_size = len - PDU_HEADER_SIZE;
 
-	device = (struct uart_dfu *) user_data;
-
-	switch (evt->type)
+	/* Validate message length. */
+	switch (pdu->hdr.opcode) {
+	case UART_DFU_OPCODE_INIT:
+	case UART_DFU_OPCODE_WRITEH:
+	case UART_DFU_OPCODE_OFFSET:
+	case UART_DFU_OPCODE_DONE:
 	{
-		case UART_TX_DONE:
-		{
-			LOG_DBG("%s: UART_TX_DONE", device->uart_label);
-			uart_tx_done_handle(device, &evt->data.tx);
-			break;
+		if (arg_size != PDU_ARG_SIZE) {
+			/* All these PDUs have the same fixed length. */
+			return false;
 		}
-		case UART_TX_ABORTED:
-		{
-			LOG_DBG("%s: UART_TX_ABORTED", device->uart_label);
-			uart_tx_aborted_handle(device, &evt->data.tx);
-			break;
+		break;
+	}
+	case UART_DFU_OPCODE_WRITEC:
+	{
+		if (arg_size == 0) {
+			/* Empty segments are disallowed. */
+			return false;
 		}
-		case UART_RX_RDY:
-		{
-			LOG_DBG("%s: UART_RX_RDY", device->uart_label);
-			uart_rx_rdy_handle(device, &evt->data.rx);
-			break;
+		break;
+	}
+	default:
+	{
+		/* Unknown opcode. */
+		return false;
+	}
+	}
+
+	return true;
+}
+
+static u32_t rx_size_get(struct uart_dfu *dev, enum inst_type *recv)
+{
+	u32_t size;
+	u32_t srv_size;
+	u32_t cli_size;
+	struct cobs_decoder *decoder;
+
+	*recv = TYPE_NONE;
+	srv_size = srv_rx_size_get(dev->srv);
+	if (srv_size > 0) {
+		*recv |= TYPE_SRV;
+	}
+	cli_size = cli_rx_size_get(dev->cli);
+	if (cli_size > 0) {
+		*recv |= TYPE_CLI;
+	}
+
+	size = MAX(cli_size, srv_size);
+	if (size > 0) {
+		decoder = &dev->decoder;
+		if (cobs_decode_in_frame(decoder)) {
+			if (cobs_decode_current_size(decoder) < size) {
+				size -= cobs_decode_current_size(decoder);
+			} else {
+				size = RX_WAIT_SIZE;
+			}
+		}	
+	}
+	return size;
+}
+
+static int send_ready(struct uart_dfu *dev, struct uart_dfu_inst *inst)
+{
+	int err;
+	size_t tx_size;
+
+	if (!atomic_cas(&dev->tx, 0, 1)) {
+		/* TX already in progress. */
+		return -EBUSY;
+	}
+
+	/* Choose buffer to transmit from.
+	   The server has priority since it can not starve the client. */
+	if (!inst_tx_rdy(inst)) {
+		(void) atomic_set(&dev->tx, 0);
+		return 0;
+	}
+
+	tx_size = inst->tx_size;
+	err = inst_tx_start(inst);
+	if (err != 0) {
+		atomic_set(&dev->tx, 0);
+		return -ECANCELED;
+	} else {
+		return (int) tx_size;
+	}
+}
+
+static int recv_ready(struct uart_dfu *dev, enum inst_type *recv)
+{
+	int err;
+	u32_t rx_size;
+
+	*recv = TYPE_NONE;
+	if (!atomic_cas(&dev->rx, 0, 1)) {
+		return -EBUSY;
+	}
+
+	rx_size = rx_size_get(dev, recv);
+	if (rx_size == 0) {
+		return 0;
+	}
+
+	LOG_DBG("%s: enabling RX (size=%u)", dev->label, rx_size);
+	err = uart_rx_enable(dev->dev, dev->rx_buf, rx_size, SYS_FOREVER_MS);
+	if (err != 0) {
+		LOG_ERR("%s: error enabling RX: %d.", dev->label, err);
+		return -ECANCELED;	
+	}
+	return rx_size;
+}
+
+static enum inst_type timer_start_ready(struct uart_dfu *dev)
+{
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+	enum inst_type started = TYPE_NONE;
+
+	if (cli != NULL && inst_rx_timeout_start(&cli->inst)) {
+		started |= TYPE_CLI;
+		LOG_DBG("%s: started client RX timeout.", dev->label);
+	}
+	if (srv != NULL && inst_rx_timeout_start(&srv->inst)) {
+		started |= TYPE_SRV;
+		LOG_DBG("%s: started server RX timeout.", dev->label);
+	}
+	return started;
+}
+
+static void timer_stop(struct uart_dfu *dev, enum inst_type started)
+{
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+
+	if (cli != NULL && started & TYPE_CLI) {
+		inst_rx_timeout_stop(&cli->inst);
+	}
+	if (srv != NULL && started & TYPE_SRV) {
+		inst_rx_timeout_stop(&srv->inst);
+	}
+}
+
+static void recv_check(struct uart_dfu *dev)
+{
+	int err;
+	enum inst_type recv;
+	enum inst_type started;
+
+	started = timer_start_ready(dev);
+	err = recv_ready(dev, &recv);
+	if (err < 0 && err != -EBUSY) {
+		LOG_ERR("%s: error %d while starting RX.", dev->label, err);
+		timer_stop(dev, started);
+		if (recv & TYPE_CLI) {
+			cli_recv_abort_handle(dev, -ECANCELED);
 		}
-		case UART_RX_BUF_REQUEST:
-		{
-			LOG_DBG("%s: UART_RX_BUF_REQUEST", device->uart_label);
-			uart_rx_buf_request_handle(device);
-			break;
+		if (recv & TYPE_SRV) {
+			srv_recv_abort_handle(dev, -ECANCELED);
 		}
-		case UART_RX_BUF_RELEASED:
-		{
-			LOG_DBG("%s: UART_RX_BUF_RELEASED", device->uart_label);
-			uart_rx_buf_released_handle(device, &evt->data.rx_buf);
-			break;
+	}
+}
+
+static void send_check(struct uart_dfu *dev)
+{
+	int err;
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+	
+	if (srv != NULL) {
+		err = send_ready(dev, &srv->inst);
+		if (err > 0 || err == -EBUSY) {
+			return;
 		}
-		case UART_RX_DISABLED:
-		{
-			LOG_DBG("%s: UART_RX_DISABLED", device->uart_label);
-			uart_rx_disabled_handle(device);
-			break;
+		if (err < 0) {
+			srv_recv_abort_handle(dev, -ECANCELED);
 		}
-		case UART_RX_STOPPED:
-		{
-			LOG_DBG("%s: UART_RX_STOPPED", device->uart_label);
-			uart_rx_stopped_handle(device, &evt->data.rx_stop);
-			break;
+	}
+	if (cli != NULL) {
+		err = send_ready(dev, &cli->inst);
+		if (err > 0 || err == -EBUSY) {
+			return;
 		}
-		default:
-		{
-			break;
+		if (err < 0) {
+			cli_recv_abort_handle(dev, -ECANCELED);
 		}
+	}
+}
+
+/*
+ * Workqueue handlers
+ *****************************************************************************/
+
+static void tx_dis_process(struct k_work *work)
+{
+	int err;
+	struct tx_dis_info *info = CONTAINER_OF(work, struct tx_dis_info, work);
+	struct uart_dfu *dev = CONTAINER_OF(info, struct uart_dfu, tx_dis);
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+
+	atomic_set(&dev->tx, 0);
+	
+	if (cli != NULL && info->buf == cli->buf) {
+		err = inst_tx_abort_check(&cli->inst);
+		if (err == 0) {
+			cli_send_handle(dev);
+		} else {
+			cli_send_abort_handle(dev, err);
+		}
+	} else if (srv != NULL && info->buf == srv->buf) {
+		err = inst_tx_abort_check(&srv->inst);
+		if (err == 0) {
+			srv_send_handle(dev);
+		} else {
+			srv_send_abort_handle(dev, err);
+		}
+	}
+
+	/* Resume reception if applicable. */
+	(void) recv_check(dev);
+	/* Send queued transmissions */
+	(void) send_check(dev);
+}
+
+static void rx_process(struct uart_dfu *dev,
+		       const u8_t *buf,
+		       size_t *offset,
+		       size_t bound)
+{
+	int err;
+	struct uart_dfu_pdu *pdu;
+	size_t len;
+
+	err = cobs_decode(&dev->decoder,
+			  &len,
+			  buf,
+			  offset,
+			  bound - *offset);
+	if (err == -EMSGSIZE) {
+		LOG_DBG("%s: PDU incomplete.", dev->label);
+		return;
+	}
+	if (err == 0) {
+		if (!pdu_validate(dev->rx_decoded_buf, len)) {
+			LOG_ERR("%s: received invalid PDU.", dev->label);
+		}
+		pdu = (struct uart_dfu_pdu *) dev->rx_decoded_buf; 
+		LOG_DBG("%s: received PDU.", dev->label);
+		if (pdu->hdr.status) {
+			cli_recv_handle(dev, pdu, len);
+		} else {
+			srv_recv_handle(dev, pdu, len);
+		}
+	} else {
+		LOG_ERR("%s: error %d while decoding data.",
+			dev->label,
+			err);
+	}
+}
+
+static void rx_rdy_process(struct k_work *work)
+{
+	struct rx_rdy_info *info = CONTAINER_OF(work, struct rx_rdy_info, work);
+	struct uart_dfu *dev = CONTAINER_OF(info, struct uart_dfu, rx_rdy);
+	size_t offset = info->offset;
+	size_t bound = offset + info->len;
+	const u8_t * buf = &info->buf[info->offset];
+
+	LOG_DBG("%s: RX process (offset=%u, len=%u)",
+		dev->label,
+		info->offset,
+		info->len);
+
+	while (offset < bound) {
+		rx_process(dev, buf, &offset, bound);	
+	}
+	
+	/* Send queued transmissions */
+	(void) send_check(dev);
+}
+
+static void rx_dis_process(struct k_work *work)
+{
+	int err;
+	struct uart_dfu *dev = CONTAINER_OF(work, struct uart_dfu, rx_dis_work);
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+
+	atomic_set(&dev->rx, 0);
+
+	/* Check for RX timeout/abort. */
+	if (cli != NULL && (err = inst_rx_abort_check(&cli->inst)) != 0) {
+		cli_recv_abort_handle(dev, err);
+	}
+	if (srv != NULL && (err = inst_rx_abort_check(&srv->inst)) != 0) {
+		srv_recv_abort_handle(dev, err);
+	}
+	
+	/* Resume reception */
+	(void) recv_check(dev);
+}
+
+
+/*
+ * Timer event handlers
+ *****************************************************************************/
+
+static void rx_timer_expired(struct k_timer *timer)
+{
+	struct uart_dfu *dev;
+	struct uart_dfu_inst *inst;
+
+	inst = CONTAINER_OF(timer, struct uart_dfu_inst, timer);
+	dev = (struct uart_dfu *) inst->mod_ctx;
+	if (dev == NULL) {
+		return;
+	}
+	
+	LOG_DBG("%s: RX timeout.", dev->label);
+	inst_rx_timeout(inst);
+}
+
+
+/*
+ * UART event handlers
+ *****************************************************************************/
+
+static void tx_done_handle(struct uart_dfu *dev,
+			   struct uart_event_tx *evt,
+			   bool aborted)
+{
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+
+	if (cli != NULL && evt->buf == cli->buf) {
+		inst_tx_finish(&cli->inst, aborted);
+	} else if (srv != NULL && evt->buf == srv->buf) {
+		inst_tx_finish(&srv->inst, aborted);
+	}
+	
+	dev->tx_dis.buf = evt->buf;
+	dev->tx_dis.len = evt->len;
+	k_work_submit_to_queue(&dev->workqueue, &dev->tx_dis.work);	
+}
+
+static void uart_tx_done_handle(struct uart_dfu *dev, struct uart_event_tx *evt)
+{
+	LOG_DBG("%s: TX (len=%u)", dev->label, evt->len);	
+	tx_done_handle(dev, evt, false);
+}
+
+static void uart_tx_aborted_handle(struct uart_dfu *dev,
+				   struct uart_event_tx *evt)
+{
+	LOG_DBG("%s: TX aborted (len=%u)", dev->label, evt->len);
+	tx_done_handle(dev, evt, true);
+}
+
+static void uart_rx_rdy_handle(struct uart_dfu *dev, struct uart_event_rx *evt)
+{
+	LOG_DBG("%s: RX (offset=%u, len=%u)",
+		dev->label,
+		evt->offset,
+		evt->len);
+
+	dev->rx_rdy.buf = evt->buf;
+	dev->rx_rdy.offset = evt->offset;
+	dev->rx_rdy.len = evt->len;
+
+	k_work_submit_to_queue(&dev->workqueue, &dev->rx_rdy.work);
+}
+
+static void uart_rx_stopped_handle(struct uart_dfu *dev,
+				   struct uart_event_rx_stop *evt)
+{
+	struct uart_dfu_cli *cli = dev->cli;
+	struct uart_dfu_srv *srv = dev->srv;
+
+	LOG_ERR("%s: RX stopped (reason=%d)", dev->label, evt->reason);
+
+#if 0
+	/* TODO: decide on how to handle this. The STOPPED event occurs during
+	         flashing, so aborting makes it impossible to debug */
+	/* Abort any ongoing reception. */
+	if (cli != NULL && inst_rx_rdy(&cli->inst)) {
+		inst_rx_set_abort(&cli->inst, true);
+	}
+	if (srv != NULL && inst_rx_rdy(&srv->inst)) {
+		inst_rx_set_abort(&srv->inst, true);
+	}
+#endif
+}
+
+static void uart_rx_disabled_handle(struct uart_dfu *dev)
+{
+	k_work_submit_to_queue(&dev->workqueue, &dev->rx_dis_work);
+}
+
+static void uart_async_cb(struct uart_event *evt, void *user_data)
+{
+	struct uart_dfu *dev = (struct uart_dfu *) user_data;
+
+	switch (evt->type) {
+	case UART_TX_DONE:
+		LOG_DBG("%s: UART_TX_DONE", dev->label);
+		uart_tx_done_handle(dev, &evt->data.tx);
+		break;
+	case UART_TX_ABORTED:
+		LOG_DBG("%s: UART_TX_ABORTED", dev->label);
+		uart_tx_aborted_handle(dev, &evt->data.tx);
+		break;
+	case UART_RX_RDY:
+		LOG_DBG("%s: UART_RX_RDY", dev->label);
+		uart_rx_rdy_handle(dev, &evt->data.rx);
+		break;
+	case UART_RX_DISABLED:
+		LOG_DBG("%s: UART_RX_DISABLED", dev->label);
+		uart_rx_disabled_handle(dev);
+		break;
+	case UART_RX_STOPPED:
+		LOG_DBG("%s: UART_RX_STOPPED", dev->label);
+		uart_rx_stopped_handle(dev, &evt->data.rx_stop);
+		break;
+	case UART_RX_BUF_REQUEST:
+	case UART_RX_BUF_RELEASED:
+	default:
+		break;
 	}
 }
 
 
 /*****************************************************************************
- * API functions 
- *****************************************************************************/
+* API functions
+*****************************************************************************/
 
-int uart_dfu_init(size_t inst_idx)
+int uart_dfu_init(size_t idx)
 {
 	int err;
-	struct uart_dfu * device;
+	struct uart_dfu *dev;
+	struct uart_config cfg;
 
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
+	dev = dfu_device_get(idx);
+	if (dev == NULL) {
 		return -EINVAL;
 	}
 
-	printk("Initializing UART DFU on %s.\n", device->uart_label);
+	printk("Initializing UART DFU on %s.\n", dev->label);
 
-	device->uart_dev = device_get_binding(device->uart_label);
-	if (device->uart_dev == NULL)
-	{
+	if (dev->dev != NULL) {
+		printk("Error: multiple initialization on %s.\n", dev->label);
+		return -EBUSY;
+	}
+
+	/* Driver init */
+	dev->dev = device_get_binding(dev->label);
+	if (dev->dev == NULL) {
 		return -EACCES;
 	}
 
-	err = uart_callback_set(device->uart_dev, uart_async_cb, device);
-	if (err != 0)
-	{
-		device->uart_dev = NULL;
+	err = uart_config_get(dev->dev, &cfg);
+	if (err != 0) {
+		dev->dev = NULL;
+		return -EIO;
+	}
+	dev->baudrate = cfg.baudrate;
+
+	err = uart_callback_set(dev->dev, uart_async_cb, dev);
+	if (err != 0) {
+		dev->dev = NULL;
 		return -EIO;
 	}
 
-	k_work_q_start(&device->workqueue,
-				   device->stack_area,
-				   UART_DFU_STACK_SIZE,
-				   CONFIG_UART_DFU_LIBRARY_THREAD_PRIO);
+	/* Module init */
+	(void) atomic_set(&dev->rx, 0);
+	(void) atomic_set(&dev->tx, 0);
+	(void) cobs_decoder_init(&dev->decoder, dev->rx_decoded_buf);
+	k_work_init(&dev->rx_rdy.work, rx_rdy_process);
+	k_work_init(&dev->rx_dis_work, rx_dis_process);
+	k_work_init(&dev->tx_dis.work, tx_dis_process);
+	dev->cli = NULL;
+	dev->srv = NULL;
+	k_work_q_start(&dev->workqueue,
+		       dev->stack_area,
+		       UART_DFU_STACK_SIZE,
+		       CONFIG_UART_DFU_LIBRARY_THREAD_PRIO);
 
-	memset(&device->protocol_state, 0, sizeof(struct module_protocol_state));
-	(void) cobs_decoder_init(&device->rx_data_decoder, device->rx_data_decoded);	
-	device->tx_data_flags = ATOMIC_INIT(0);
-	k_work_init(&device->rx_buf_info.work, rx_buf_process);
-	k_work_init(&device->rx_avail_work, rx_avail_process);
-	k_work_init(&device->tx_buf_info.work, tx_buf_process);
-	k_work_init(&device->tx_avail_work, tx_avail_process);
-	device->client = NULL;
-	memset(&device->client_callbacks, 0, sizeof(struct uart_dfu_client_callbacks));
-	device->client_context = NULL;
-	device->server = NULL;
-	memset(&device->server_callbacks, 0, sizeof(struct uart_dfu_server_callbacks));
-	device->server_context = NULL;
-
-	printk("Initialized UART DFU on %s.\n", device->uart_label);
+	printk("Initialized UART DFU on %s.\n", dev->label);
 
 	return 0;
 }
 
-static int uart_dfu_sys_init(struct device * dev)
+static int uart_dfu_sys_init(struct device *dev)
 {
 	ARG_UNUSED(dev);
 
 	int err;
 
-	for (size_t inst_idx = 0; inst_idx < MAX_DEVICE_COUNT; inst_idx++)
-	{
-		if (devices[inst_idx] != NULL)
-		{
-			err = uart_dfu_init(inst_idx);
-			if (err != 0)
-			{
+	for (size_t idx = 0; idx < ARRAY_SIZE(devices); idx++) {
+		if (devices[idx] != NULL) {
+			err = uart_dfu_init(idx);
+			if (err != 0) {
 				return err;
 			}
 		}
@@ -1296,420 +1562,377 @@ static int uart_dfu_sys_init(struct device * dev)
 	return 0;
 }
 
-int uart_dfu_uninit(size_t inst_idx)
+int uart_dfu_uninit(size_t idx)
 {
-#if 0
-	int err_code = 0;
+	return -ENOSYS;
+}
 
-	/* TODO: Have another look at this function. */
+int uart_dfu_cli_init(struct uart_dfu_cli *client,
+		     struct uart_dfu_cli_cb *callbacks,
+		     uart_dfu_error_t error_cb,
+		     void *context)
+{
+	if (client == NULL			||
+	    callbacks == NULL			||
+	    callbacks->status_cb == NULL	||
+	    callbacks->offset_cb == NULL	||
+	    error_cb == NULL) {
+		return -EINVAL;
+	}
 
-	if (protocol_state.rx_state != UART_DFU_RX_STATE_STOPPED ||
-		protocol_state.tx_state != UART_DFU_TX_STATE_STOPPED ||
-		protocol_state.tx_pending)
-	{
+	inst_init(&client->inst,
+		  client->buf,
+		  UART_DFU_CLI_TX_BUF_SIZE,
+		  error_cb);
+	memset(&client->fragment, 0, sizeof(client->fragment));
+	client->cb = *callbacks;
+	client->ctx = context;
+	return 0;
+}
+
+int uart_dfu_cli_bind(size_t idx, struct uart_dfu_cli *client)
+{
+	struct uart_dfu *dev;
+	struct uart_dfu_cli *cli;
+
+	if (client == NULL) {
+		return -EINVAL;
+	}
+
+	dev = dfu_device_get(idx);
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+
+	cli = dev->cli;
+	if (cli != NULL) {
 		return -EBUSY;
 	}
 
-	if (uart_dev != NULL)
-	{
-		err_code = uart_callback_set(uart_dev, NULL, NULL);
-	}
-	if (err_code == 0)
-	{
-		uart_dev = NULL;
-		memset(&protocol_state, 0, sizeof(struct uart_dfu_state));
-		(void) cobs_decode_reset(&rx_data_decoder);
-		client = NULL;
-		server = NULL;
-	}
-
-	return err_code;
-#endif
+	dev->cli = client;
+	client->inst.mod_ctx = dev;
 	return 0;
 }
 
-int uart_dfu_client_init(struct uart_dfu_client * dfu_client)
+int uart_dfu_cli_unbind(size_t idx)
 {
-	if (dfu_client == NULL)
-	{
-		return -EINVAL; 
-	}
+	struct uart_dfu *dev;
+	struct uart_dfu_cli *cli;
 
-	dfu_client->fragment_buf = NULL;
-	dfu_client->fragment_idx = 0;
-	dfu_client->fragment_total_size = 0;
-	dfu_client->tx_size = 0;
-	atomic_set(&dfu_client->state.tx_state, (atomic_val_t) CLIENT_TX_STATE_STOPPED);
-	atomic_set(&dfu_client->state.rx_opcode, OPCODE_NONE);
-
-	return 0;
-}
-
-int uart_dfu_client_set(size_t inst_idx,
-						struct uart_dfu_client * dfu_client,
-						struct uart_dfu_client_callbacks * callbacks,
-						void * context)
-{
-	struct uart_dfu * device;
-	
-	if (dfu_client == NULL					||
-		callbacks == NULL 					||
-		callbacks->status_callback == NULL 	||
-		callbacks->offset_callback == NULL)
-	{
-		return -EINVAL; 
-	}
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
+	dev = dfu_device_get(idx);
+	if (dev == NULL) {
 		return -EINVAL;
 	}
 
-	/* TODO: Check for ongoing client ops. */
-
-	device->client = dfu_client;
-	device->client_callbacks = *callbacks;
-	device->client_context = context;
-	
-	return 0;
-}
-
-int uart_dfu_client_clear(size_t inst_idx)
-{
-	return -ENOTSUP;
-}
-
-int uart_dfu_client_init_send(size_t inst_idx, size_t file_size)
-{
-	int err;
-	struct uart_dfu * device;
-	struct uart_dfu_message message;
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (device->uart_dev == NULL || device->client == NULL)
-	{
-		return -EACCES;
-	}
-
-	if (file_size > INT32_MAX)
-	{
-		return -ENOMEM;
-	}
-
-	err = client_transaction_reserve(device->client, UART_DFU_OPCODE_INIT);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	memset(&message, 0, sizeof(struct uart_dfu_message));
-	message.header.opcode = UART_DFU_OPCODE_INIT;
-	message.args.init.file_size = (u32_t) file_size;
-
-	err = client_send(device,
-					  &message.header,
-					  &message.args,
-					  sizeof(struct uart_dfu_init_args));
-
-	if (err >= 0)
-	{
-		/* Start RX if it is not already running. */
-		err = uart_dfu_rx_start(device);
-	}
-	if (err != 0)	
-	{
-		client_send_cancel(device);
-		client_transaction_cancel(device->client);
-	}
-	
-	return err;
-}
-
-int uart_dfu_client_write_send(size_t inst_idx,
-							   const u8_t * const fragment_buf,
-							   size_t fragment_size)
-{
-	int err;
-	struct uart_dfu * device;
-	struct uart_dfu_message message;
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-	
-	if (device->uart_dev == NULL || device->client == NULL)
-	{
-		return -EACCES;
-	}
-	
-	if (fragment_buf == NULL || fragment_size == 0)
-	{
-		return -EINVAL;
-	}
-
-	if (fragment_size > INT32_MAX)
-	{
-		return -ENOMEM;
-	}
-
-	err = client_transaction_reserve(device->client, UART_DFU_OPCODE_WRITEH);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	device->client->fragment_buf = fragment_buf;
-	device->client->fragment_idx = 0;
-	device->client->fragment_total_size = fragment_size;
-	
-	memset(&message, 0, sizeof(struct uart_dfu_message));
-	message.header.opcode = UART_DFU_OPCODE_WRITEH;
-	message.args.writeh.fragment_total_size = fragment_size;
-
-	err = client_send(device,
-					  &message.header,
-					  &message.args,
-					  sizeof(struct uart_dfu_writeh_args));
-
-	if (err >= 0)
-	{
-		/* Start RX if it is not already running. */
-		err = uart_dfu_rx_start(device);
-		if (err != 0)
-		{
-			printk("uart_dfu_rx_start %d\n", err);
-		}
-	}
-	if (err != 0)	
-	{
-		client_send_cancel(device);
-		client_transaction_cancel(device->client);
-	}
-	
-	return err;
-}
-
-int uart_dfu_client_offset_send(size_t inst_idx)
-{
-	int err;
-	struct uart_dfu * device;
-	struct uart_dfu_message message;
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (device->uart_dev == NULL || device->client == NULL)
-	{
-		return -EACCES;
-	}
-
-	err = client_transaction_reserve(device->client, UART_DFU_OPCODE_OFFSET);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	memset(&message, 0, sizeof(struct uart_dfu_message));
-	message.header.opcode = UART_DFU_OPCODE_OFFSET;
-
-	err = client_send(device,
-					  &message.header,
-					  &message.args,
-					  sizeof(struct uart_dfu_offset_args));
-
-	if (err >= 0)
-	{
-		/* Start RX if it is not already running. */
-		err = uart_dfu_rx_start(device);
-	}
-	if (err != 0)	
-	{
-		client_send_cancel(device);
-		client_transaction_cancel(device->client);
-	}
-	
-	return err;
-}
-
-int uart_dfu_client_done_send(size_t inst_idx, bool successful)
-{
-	int err;
-	struct uart_dfu * device;
-	struct uart_dfu_message message;
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (device->uart_dev == NULL || device->client == NULL)
-	{
-		return -EACCES;
-	}
-
-	err = client_transaction_reserve(device->client, UART_DFU_OPCODE_DONE);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	memset(&message, 0, sizeof(struct uart_dfu_message));
-	message.header.opcode = UART_DFU_OPCODE_DONE;
-	message.args.done.success = successful;
-
-	err = client_send(device,
-					  &message.header,
-					  &message.args,
-					  sizeof(struct uart_dfu_done_args));
-
-	if (err >= 0)
-	{
-		/* Start RX if it is not already running. */
-		err = uart_dfu_rx_start(device);
-	}
-	if (err != 0)	
-	{
-		client_send_cancel(device);
-		client_transaction_cancel(device->client);
-	}
-	
-	return err;
-}
-
-int uart_dfu_client_stop(size_t inst_idx)
-{
-	return -ENOTSUP;
-}
-
-int uart_dfu_server_init(struct uart_dfu_server * dfu_server,
-						u8_t * fragment_buf,
-						size_t fragment_max_size)
-{
-	if (dfu_server == NULL 		||
-		fragment_buf == NULL 	||
-		fragment_max_size == 0)
-	{
-		return -EINVAL;
-	}
-	
-	memset(dfu_server, 0, sizeof(struct uart_dfu_server));
-	dfu_server->fragment_buf = fragment_buf;
-	dfu_server->fragment_idx = 0;
-	dfu_server->fragment_max_size = fragment_max_size;
-	dfu_server->tx_size = 0;
-	atomic_set(&dfu_server->state.rx_state, (atomic_t) SERVER_RX_STATE_STOPPED);
-	atomic_set(&dfu_server->state.tx_opcode, OPCODE_NONE);
-	atomic_set(&dfu_server->state.tx_opcode, OPCODE_NONE);
-
-	return 0;
-}
-
-int uart_dfu_server_set(size_t inst_idx,
-						struct uart_dfu_server * dfu_server,
-						struct uart_dfu_server_callbacks * callbacks,
-						void * context)
-{
-	struct uart_dfu * device;
-
-	if (dfu_server == NULL 					||
-		callbacks == NULL 					||
-		callbacks->init_callback == NULL 	||
-		callbacks->write_callback == NULL	||
-		callbacks->offset_callback == NULL 	||
-		callbacks->done_callback == NULL)
-	{
-		return -EINVAL;
-	}
-	
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-
-	/* TODO: Check for ongoing server activity. */
-	device->server = dfu_server;
-	device->server_callbacks = *callbacks;
-	device->server_context = context;
-
-	return 0;
-}
-
-int uart_dfu_server_clear(size_t inst_idx)
-{
-	return -ENOTSUP;
-}
-
-int uart_dfu_server_enable(size_t inst_idx)
-{
-	int err;
-	struct uart_dfu * device;
-
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (device->uart_dev == NULL || device->server == NULL)
-	{
-		return -EACCES;
-	}
-
-	if (atomic_cas(&device->server->state.rx_state,
-				   (atomic_t) SERVER_RX_STATE_STOPPED,
-				   (atomic_t) SERVER_RX_STATE_COMMAND))
-	{
-		err = uart_dfu_rx_start(device);
-		if (err != 0)
-		{
-			atomic_set(&device->server->state.rx_state,
-					   (atomic_t) SERVER_RX_STATE_STOPPED);
-		}
-		return err;
-	}
-	else
-	{
-		/* Already started. */
+	cli = dev->cli;
+	if (cli == NULL) {
 		return 0;
 	}
+	if (inst_send_active(&cli->inst) || inst_recv_active(&cli->inst)) {
+		return -EBUSY;
+	}
+
+	cli->inst.mod_ctx = dev;
+	dev->cli = NULL;
+	return 0;
 }
 
-int uart_dfu_server_disable(size_t inst_idx)
+static int api_cli_get(size_t idx, struct uart_dfu_cli **cli)
 {
-	struct uart_dfu * device;
+	struct uart_dfu *dev = dfu_device_get(idx);
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+	if (dev->dev == NULL || dev->cli == NULL) {
+		return -EACCES;
+	}
+	*cli = dev->cli;
+	return 0;
+}
+
+static int api_cli_send(struct uart_dfu_cli *cli, struct uart_dfu_pdu *pdu)
+{
+	int err;
+	struct uart_dfu *dev = (struct uart_dfu *) cli->inst.mod_ctx;
+	enum inst_type recv;
+
+	err = inst_send_cond(&cli->inst,
+			     OPCODE_NONE,
+			     &pdu->hdr,
+			     &pdu->args,
+			     sizeof(pdu->args));
+	if (err != 0) {
+		return err;
+	}
+	err = inst_recv_cond(&cli->inst, OPCODE_NONE, pdu->hdr.opcode);
+	if (err != 0) {
+		inst_send_cancel(&cli->inst);
+		return -ECANCELED;
+	}
+
+	err = send_ready(dev, &cli->inst);
+	if (err <= 0 && err != -EBUSY) {
+		goto cleanup;
+	}
+	err = recv_ready(dev, &recv);
+	if (err > 0 || err == -EBUSY) {
+		LOG_DBG("api cli send success");
+		return 0;
+	}
+
+cleanup:
+	inst_recv_cancel(&cli->inst);
+	inst_send_cancel(&cli->inst);
+	return -ECANCELED;
+}
+
+int uart_dfu_cli_init_send(size_t idx, size_t file_size)
+{
+	int err;
+	struct uart_dfu_cli *cli;
+	struct uart_dfu_pdu pdu;
+
+	LOG_DBG("cli init send.");
+
+	if (file_size > INT32_MAX) {
+		return -ENOMEM;
+	}
 	
-	device = dfu_device_get(inst_idx);
-	if (device == NULL)
-	{
+	err = api_cli_get(idx, &cli);
+	if (err != 0) {
+		return err;
+	}
+
+	memset(&pdu, 0, sizeof(pdu));
+	pdu.hdr.opcode = UART_DFU_OPCODE_INIT;
+	pdu.args.init.file_size = (u32_t) file_size;
+
+	return api_cli_send(cli, &pdu);
+}
+
+int uart_dfu_cli_write_send(size_t idx,
+			    const u8_t *const fragment_buf,
+			    size_t fragment_size)
+{
+	int err;
+	struct uart_dfu_cli *cli;
+	struct uart_dfu_pdu pdu;
+
+	LOG_DBG("cli write send.");
+	
+	if (fragment_buf == NULL || fragment_size == 0) {
 		return -EINVAL;
 	}
 
-	if (device->uart_dev == NULL || device->server == NULL)
-	{
+	if (fragment_size > INT32_MAX) {
+		return -ENOMEM;
+	}
+
+	err = api_cli_get(idx, &cli);
+	if (err != 0) {
+		return err;
+	}
+
+	if (inst_send_active(&cli->inst)) {
+		return -ECANCELED;
+	}
+
+	buf_in_cfg(&cli->fragment, fragment_buf, 0, fragment_size);
+	memset(&pdu, 0, sizeof(pdu));
+	pdu.hdr.opcode = UART_DFU_OPCODE_WRITEH;
+	pdu.args.writeh.fragment_size = fragment_size;
+	err = api_cli_send(cli, &pdu);
+	if (err != 0) {
+		buf_in_cfg(&cli->fragment, NULL, 0, 0);
+	}
+	return err;
+}
+
+int uart_dfu_cli_offset_send(size_t idx)
+{
+	int err;
+	struct uart_dfu_cli *cli;
+	struct uart_dfu_pdu pdu; 
+
+	LOG_DBG("cli offset send.");
+	
+	err = api_cli_get(idx, &cli);
+	if (err != 0) {
+		return err;
+	}
+
+	memset(&pdu, 0, sizeof(pdu));
+	pdu.hdr.opcode = UART_DFU_OPCODE_OFFSET;
+	return api_cli_send(cli, &pdu);
+}
+
+int uart_dfu_cli_done_send(size_t idx, bool successful)
+{
+	int err;
+	struct uart_dfu_cli *cli;
+	struct uart_dfu_pdu pdu;
+
+	LOG_DBG("cli done send.");
+	
+	err = api_cli_get(idx, &cli);
+	if (err != 0) {
+		return err;
+	}
+
+	memset(&pdu, 0, sizeof(pdu));
+	pdu.hdr.opcode = UART_DFU_OPCODE_DONE;
+	pdu.args.done.success = successful;
+	return api_cli_send(cli, &pdu);
+}
+
+int uart_dfu_cli_stop(size_t idx)
+{
+	int err;
+	struct uart_dfu_cli *cli;
+
+	err = api_cli_get(idx, &cli);
+	if (err != 0) {
+		return err;
+	}
+	return inst_active_abort(&cli->inst);
+}
+
+int uart_dfu_srv_init(struct uart_dfu_srv *server,
+		      u8_t *fragment_buf,
+		      size_t fragment_max_size,
+		      struct uart_dfu_srv_cb *callbacks,
+		      uart_dfu_error_t error_cb,
+		      void *context)
+{
+	if (server == NULL			||
+	    fragment_buf == NULL		||
+	    fragment_max_size == 0		||
+	    callbacks == NULL			||
+	    callbacks->init_cb == NULL		||
+	    callbacks->write_cb == NULL		||
+	    callbacks->offset_cb == NULL	||
+	    callbacks->done_cb == NULL		||
+	    error_cb == NULL) {
+		return -EINVAL;
+	}
+
+	inst_init(&server->inst,
+		  server->buf,
+		  UART_DFU_SRV_TX_BUF_SIZE,
+		  error_cb);
+	memset(&server->fragment, 0, sizeof(server->fragment));
+	server->fragment.buf = fragment_buf;
+	server->fragment.max_size = fragment_max_size;	
+	server->cb = *callbacks;
+	server->ctx = context;
+	return 0;
+}
+
+static int api_srv_get(size_t idx, struct uart_dfu_srv **srv)
+{
+	struct uart_dfu *dev = dfu_device_get(idx);
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+	if (dev->dev == NULL || dev->srv == NULL) {
 		return -EACCES;
 	}
-	/* TODO */
+	*srv = dev->srv;
+	return 0;
+}
 
-	return -ENOTSUP;
+int uart_dfu_srv_bind(size_t idx, struct uart_dfu_srv *server)
+{
+	struct uart_dfu *dev;
+	struct uart_dfu_srv *srv;
+
+	if (server == NULL) {
+		return -EINVAL;
+	}
+
+	dev = dfu_device_get(idx);
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+
+	srv = dev->srv;
+	if (srv != NULL) {
+		return -EBUSY;
+	}
+
+	dev->srv = server;
+	server->inst.mod_ctx = dev;
+	return 0;
+}
+
+int uart_dfu_srv_unbind(size_t idx)
+{
+	struct uart_dfu *dev;
+	struct uart_dfu_srv *srv;
+
+	dev = dfu_device_get(idx);
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+
+	srv = dev->srv;
+	if (srv == NULL) {
+		return 0;
+	}
+	
+	if (inst_send_active(&srv->inst) || inst_recv_active(&srv->inst)) {
+		return -EBUSY;
+	}
+
+	srv->inst.mod_ctx = NULL;
+	dev->srv = NULL;
+	return 0;
+}
+
+int uart_dfu_srv_enable(size_t idx)
+{
+	int err;
+	struct uart_dfu *dev;
+	struct uart_dfu_srv *srv;
+	enum inst_type recv;
+
+	err = api_srv_get(idx, &srv);
+	if (err != 0) {
+		return err;
+	}
+
+	err = inst_recv_cond(&srv->inst, OPCODE_NONE, OPCODE_ANY);
+	if (err != 0) {
+		return err;
+	}
+
+	dev = (struct uart_dfu *) srv->inst.mod_ctx;
+	err = recv_ready(dev, &recv);
+
+	if (err > 0 || err == -EBUSY) {
+		return 0;
+	} else {
+		(void) inst_recv_cancel(&srv->inst);
+		return -ECANCELED;
+	}
+}
+
+int uart_dfu_srv_disable(size_t idx)
+{
+	int err;
+	struct uart_dfu_srv *srv;
+
+	err = api_srv_get(idx, &srv);
+	if (err != 0) {
+		return err;
+	}
+	return inst_active_abort(&srv->inst);
 }
 
 
 /*****************************************************************************
- * System initialization hooks 
- *****************************************************************************/
+* System initialization hooks
+*****************************************************************************/
 
 #ifdef CONFIG_UART_DFU_SYS_INIT
 SYS_INIT(uart_dfu_sys_init, APPLICATION, CONFIG_UART_DFU_INIT_PRIORITY);

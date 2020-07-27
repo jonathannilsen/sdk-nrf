@@ -28,10 +28,13 @@
  * Structure definitions 
  *****************************************************************************/
 
-struct uart_dfu_header {
-	u8_t opcode : 3;
-	u8_t status : 1;
-	u8_t rfu 	: 4;
+/**
+ * UART DFU header structure.
+ */
+struct uart_dfu_hdr {
+	u8_t opcode	: 3;
+	u8_t status	: 1;
+	u8_t rfu	: 4;
 } __packed;
 
 struct uart_dfu_init_args {
@@ -39,7 +42,7 @@ struct uart_dfu_init_args {
 } __packed;
 
 struct uart_dfu_writeh_args {
-	u32_t fragment_total_size;
+	u32_t fragment_size;
 } __packed;
 
 struct uart_dfu_writec_args {
@@ -71,8 +74,8 @@ union uart_dfu_args {
     struct uart_dfu_done_args done;
 };
 
-struct uart_dfu_message {
-	struct uart_dfu_header header;
+struct uart_dfu_pdu {
+	struct uart_dfu_hdr hdr;
     union uart_dfu_args args;
 } __packed;
 
