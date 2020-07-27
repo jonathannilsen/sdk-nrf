@@ -101,23 +101,24 @@ static int dfu_server_write_callback(const u8_t * const fragment_buf,
 static int dfu_server_offset_callback(size_t * offset, void * context)
 {
     int err;
-
-    ARG_UNUSED(context);
-
+    struct uart_dfu_target_server * server;
+    
     LOG_INF("Offset()");
 
-    err = dfu_target_offset_get(offset);
-    if (err == -EACCES)
+    server = (struct uart_dfu_target_server *) context;
+
+    if (atomic_get(&server->initialized) == 0)
     {
         /* The target is not yet initialized,
            so we just return an offset of 0. */
         *offset = 0;
         return 0;
     }
-    else
-    {
-        return err;
-    }
+    
+    err = dfu_target_offset_get(offset);
+    /* XXX: Should we handle -EACCES here?
+        We may see it if dfu_target is used from another context. */
+    return err;
 }
 
 static int dfu_server_done_callback(bool successful, void * context)
