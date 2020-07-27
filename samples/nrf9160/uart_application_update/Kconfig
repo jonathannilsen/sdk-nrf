@@ -4,29 +4,32 @@
 # SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
 #
 
-# menu "HTTP application update sample"
-# 
-# config DOWNLOAD_HOST
-# 	string "Download host name"
-# 
-# config DOWNLOAD_PORT
-# 	int "Download host port number. Set to 0 to use default HTTP/HTTPS port."
-# 	default 0
-# 
-# config DOWNLOAD_FILE
-# 	string "The file to download"
-# 
-# config APPLICATION_VERSION
-# 	int "Application version"
-# 	default 1
-# 
-# config USE_HTTPS
-# 	bool
-# 	prompt "Use HTTPS for download"
-# 	depends on DOWNLOAD_CLIENT_TLS
-# 
-# endmenu
-# 
+menu "HTTP/UART application update sample"
+
+config DOWNLOAD_HOST
+	string "Download host name"
+
+config DOWNLOAD_PORT
+	int "Download host port number. Set to 0 to use default HTTP/HTTPS port."
+	default 0
+
+config DOWNLOAD_NRF91_FILE
+	string "The file name of the nRF91 firmware image."
+
+config DOWNLOAD_NRF52_FILE
+    string "The file name of the nRF52 firmware image."
+
+config APPLICATION_VERSION
+	int "Application version"
+	default 1
+
+config USE_HTTPS
+	bool
+	prompt "Use HTTPS for download"
+	depends on DOWNLOAD_CLIENT_TLS
+
+endmenu
+
 menu "Zephyr Kernel"
 source "Kconfig.zephyr"
 endmenu

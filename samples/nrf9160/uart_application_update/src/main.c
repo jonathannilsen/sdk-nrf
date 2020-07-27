@@ -7,39 +7,36 @@
 #include <drivers/gpio.h>
 #include <drivers/flash.h>
 #include <logging/log.h>
-// #include <bsd.h>
-// #include <modem/lte_lc.h>
-// #include <modem/at_cmd.h>
-// #include <modem/at_notif.h>
-// #include <modem/bsdlib.h>
-// #include <modem/modem_key_mgmt.h>
-// #include <net/fota_download.h>
+#include <bsd.h>
+#include <sys/atomic.h>
+#include <modem/lte_lc.h>
+#include <modem/at_cmd.h>
+#include <modem/at_notif.h>
+#include <modem/bsdlib.h>
+#include <modem/modem_key_mgmt.h>
+#include <net/fota_download.h>
 #include <dfu/mcuboot.h>
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>
 
-#if 0
-
-#define LED_PORT	DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
-#define TLS_SEC_TAG 42
+#define UART_DFU_INST_IDX	0
+#define LED_PORT		DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
+#define TLS_SEC_TAG 		42
 
 static struct device *		gpiob;
-static struct gpio_callback gpio_cb;
+static struct gpio_callback	gpio_cb;
+static atomic_t 		sw_pressed = ATOMIC_INIT(0);
 static struct k_work		fota_work;
-
-#endif
 
 static struct uart_dfu_target_server target_server;
 
-LOG_MODULE_REGISTER(app, LOG_LEVEL_DBG);
-
-#if 0
 
 /**@brief Recoverable BSD library error. */
 void bsd_recoverable_error_handler(uint32_t err)
 {
 	printk("bsdlib recoverable error: %u\n", err);
 }
+
 
 int cert_provision(void)
 {
@@ -85,12 +82,36 @@ int cert_provision(void)
 	return 0;
 }
 
+
+static void dfu_buttons_enable(void)
+{
+	gpio_pin_interrupt_configure(gpiob,
+				DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
+				GPIO_INT_EDGE_TO_ACTIVE);
+	gpio_pin_interrupt_configure(gpiob,
+				DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
+				GPIO_INT_EDGE_TO_ACTIVE);
+}
+
+
+static void dfu_buttons_disable(void)
+{
+	gpio_pin_interrupt_configure(gpiob,
+				DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
+				GPIO_INT_DISABLE);
+	gpio_pin_interrupt_configure(gpiob,
+				DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
+				GPIO_INT_DISABLE);
+}
+
+
 /**@brief Start transfer of the file. */
 static void app_dfu_transfer_start(struct k_work *unused)
 {
 	int retval;
 	int sec_tag;
 	char *apn = NULL;
+	atomic_val_t sw_no;
 
 #ifndef CONFIG_USE_HTTPS
 	sec_tag = -1;
@@ -98,17 +119,28 @@ static void app_dfu_transfer_start(struct k_work *unused)
 	sec_tag = TLS_SEC_TAG;
 #endif
 
-	retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
-				     CONFIG_DOWNLOAD_FILE,
-				     sec_tag,
-				     CONFIG_DOWNLOAD_PORT,
-				     apn);
+	sw_no = atomic_set(&sw_pressed, 0);
+	if (sw_no == BIT(0)) {
+		retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
+					     CONFIG_DOWNLOAD_NRF91_FILE,
+					     sec_tag,
+					     CONFIG_DOWNLOAD_PORT,
+					     apn);
+	}
+	else if (sw_no == BIT(1)) {
+		retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
+					     CONFIG_DOWNLOAD_NRF52_FILE,
+					     sec_tag,
+					     CONFIG_DOWNLOAD_PORT,
+					     apn);
+	}
+	else {
+		retval = -EINVAL;
+	}
+	
 	if (retval != 0) {
 		/* Re-enable button callback */
-		gpio_pin_interrupt_configure(gpiob,
-					     DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
-					     GPIO_INT_EDGE_TO_ACTIVE);
-
+		dfu_buttons_enable();
 		printk("fota_download_start() failed, err %d\n",
 			retval);
 	}
@@ -142,12 +174,35 @@ static int led_app_version(void)
 }
 
 
+static u32_t pin_to_sw_bits(u32_t pins)
+{
+	switch (pins) {
+	case BIT(DT_GPIO_PIN(DT_ALIAS(sw0), gpios)): return BIT(0);
+	case BIT(DT_GPIO_PIN(DT_ALIAS(sw1), gpios)): return BIT(1);
+	}
+
+	printk("No match for GPIO pin 0x%08x\n", pins);
+	return 0;
+}
+
+
 void dfu_button_pressed(struct device *gpiob, struct gpio_callback *cb,
 			u32_t pins)
 {
-	k_work_submit(&fota_work);
-	gpio_pin_interrupt_configure(gpiob, DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
-				     GPIO_INT_DISABLE);
+	atomic_val_t sw_bits;
+
+	sw_bits = (atomic_val_t) pin_to_sw_bits(pins);
+	if (sw_bits == 0) {
+		return;
+	}
+
+	if (atomic_cas(&sw_pressed, 0, sw_bits)) {
+		dfu_buttons_disable();
+		k_work_submit(&fota_work);
+	}
+	else {
+		printk("FOTA start failed: busy.\n");
+	}
 }
 
 
@@ -163,19 +218,38 @@ static int dfu_button_init(void)
 	err = gpio_pin_configure(gpiob, DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
 				 GPIO_INPUT |
 				 DT_GPIO_FLAGS(DT_ALIAS(sw0), gpios));
-	if (err == 0) {
-		gpio_init_callback(&gpio_cb, dfu_button_pressed,
-			BIT(DT_GPIO_PIN(DT_ALIAS(sw0), gpios)));
-		err = gpio_add_callback(gpiob, &gpio_cb);
-	}
-	if (err == 0) {
-		err = gpio_pin_interrupt_configure(gpiob,
-						   DT_GPIO_PIN(DT_ALIAS(sw0),
-							       gpios),
-						   GPIO_INT_EDGE_TO_ACTIVE);
-	}
 	if (err != 0) {
-		printk("Unable to configure SW0 GPIO pin!\n");
+		goto done;
+	}
+
+	err = gpio_pin_configure(gpiob, DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
+				 GPIO_INPUT |
+				 DT_GPIO_FLAGS(DT_ALIAS(sw1), gpios));
+	if (err != 0) {
+		goto done;
+	}
+
+	err = gpio_pin_interrupt_configure(gpiob,
+					DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
+					GPIO_INT_EDGE_TO_ACTIVE);
+	if (err != 0) {
+		goto done;
+	}
+
+	err = gpio_pin_interrupt_configure(gpiob,
+					DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
+					GPIO_INT_EDGE_TO_ACTIVE);
+	if (err != 0) {
+		goto done;
+	}
+	
+	gpio_init_callback(&gpio_cb, dfu_button_pressed,
+		BIT(DT_GPIO_PIN(DT_ALIAS(sw0), gpios)) |
+		BIT(DT_GPIO_PIN(DT_ALIAS(sw1), gpios)));
+	err = gpio_add_callback(gpiob, &gpio_cb);
+done:
+	if (err != 0) {
+		printk("Unable to configure SW0/SW1 GPIO pins!\n");
 		return 1;
 	}
 	return 0;
@@ -190,15 +264,14 @@ void fota_dl_handler(const struct fota_download_evt *evt)
 		/* Fallthrough */
 	case FOTA_DOWNLOAD_EVT_FINISHED:
 		/* Re-enable button callback */
-		gpio_pin_interrupt_configure(gpiob,
-					     DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
-					     GPIO_INT_EDGE_TO_ACTIVE);
+		dfu_buttons_enable();
 		break;
 
 	default:
 		break;
 	}
 }
+
 
 /**@brief Configures modem to provide LTE link.
  *
@@ -247,6 +320,15 @@ static int application_init(void)
 		return err;
 	}
 
+	err = uart_dfu_target_server_init(&target_server, UART_DFU_INST_IDX);
+	if (err != 0) {
+		return err;
+	}
+
+	err = uart_dfu_target_server_enable(&target_server);
+	if (err != 0) {
+		return err;
+	}
 
 	err = fota_download_init(fota_dl_handler);
 	if (err != 0) {
@@ -256,13 +338,11 @@ static int application_init(void)
 	return 0;
 }
 
-#endif
 
 void main(void)
 {
 	int err;
 
-#if 0
 	printk("HTTP application update sample started\n");
 	printk("Initializing bsdlib\n");
 #if !defined(CONFIG_BSD_LIBRARY_SYS_INIT)
@@ -299,37 +379,13 @@ void main(void)
 	printk("Initialized bsdlib\n");
 
 	modem_configure();
-
-
-	/*
-		Removed this temporarily, since this causes some errors sometimes
-		TODO: Remember to get to the bottom of it soon or later
-	*/
-	//boot_write_img_confirmed();
-
+	
 	err = application_init();
 	if (err != 0) {
 		return;
 	}
 
-#endif
-	LOG_INF("uart_application_update starting.");
-
-	err = uart_dfu_target_server_init(&target_server, 0);
-	if (err != 0)
-	{
-		LOG_ERR("Failed to initialize UART DFU server.");
-		return;
-	}
-
-	err = uart_dfu_target_server_enable(&target_server);
-	if (err != 0)
-	{
-		LOG_ERR("Failed to enable UART DFU server.");
-		return;
-	}
-
 	boot_write_img_confirmed();
 	
-	LOG_INF("Sample started.\n");
+	printk("Sample started.\n");
 }
