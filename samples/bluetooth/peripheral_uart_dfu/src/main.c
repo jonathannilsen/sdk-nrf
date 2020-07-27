@@ -40,22 +40,20 @@ static struct {
 	u32_t file_size;
 	u32_t current_crc;
 #if CONFIG_DFU_THREAD
-	int img_type;
 	struct ring_buf rbuf;
 	u8_t rbuf_internal[CONFIG_DFU_THREAD_BUF_SIZE];
 	struct k_sem sem_rbuf;
 	struct k_sem sem_exit;
 	struct k_thread thread;
+	bool thread_alive;
 	bool thread_exit;
-	k_tid_t tid;
 #endif
 } sfts_dfu_ctx;
 
 #if CONFIG_DFU_THREAD
-K_THREAD_STACK_DEFINE(dfu_thread_stack, 128);
+K_THREAD_STACK_DEFINE(dfu_thread_stack, CONFIG_DFU_THREAD_STACK_SIZE);
 #endif
 
-/* BLE Advertising Data. */
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SFTS_UUID_SERVICE),
@@ -153,10 +151,15 @@ static int sfts_dfu_stop(bool successful)
 }
 
 #if CONFIG_DFU_THREAD
+/* This function is to be called within DFU thread. */
 static void sfts_dfu_thread_cleanup(void)
 {
-	sfts_dfu_ctx.thread_exit = false;
+	/* Wake up the thread from which 'sfts_dfu_thread_exit' was called. */
 	k_sem_give(&sfts_dfu_ctx.sem_exit);
+
+	/* Reset rbuf in this thread because memset is costly. */
+	ring_buf_reset(&sfts_dfu_ctx.rbuf);
+	sfts_dfu_ctx.thread_alive = false;
 }
 
 /**
@@ -209,19 +212,23 @@ static void sfts_dfu_thread(void *p1, void *p2, void *p3)
 			return;
 		}
 	}
+
+	/* Exit signaled from BT RX thread. */
 	sfts_dfu_thread_cleanup();
 }
 
+/* This function is to be called outside of DFU thread. */
 static void sfts_dfu_thread_exit(void)
 {
+	printk("Terminating DFU thread\n");
+
 	/* Set flag to signal a graceful exit out of thread loop. */
 	sfts_dfu_ctx.thread_exit = true;
 
-	/* Wake up thread in case it is waiting for semaphore. */
+	/* Wake up thread in case it is stuck waiting for semaphore. */
 	k_sem_give(&sfts_dfu_ctx.sem_rbuf);
 
-	/* Sleep until thread exits loop. */
-	/* FIXME: forever may block too long so pick a delay and return bool */
+	/* Wait until thread exits loop. */
 	k_sem_take(&sfts_dfu_ctx.sem_exit, K_FOREVER);
 }
 #endif /* CONFIG_DFU_THREAD */
@@ -230,8 +237,16 @@ static int next_image_segment_in(const u8_t *data, u16_t len)
 {
 #if CONFIG_DFU_THREAD
 	/* Pipe data to DFU thread. */
-	/* TODO */
+	u32_t put_len = ring_buf_put(&sfts_dfu_ctx.rbuf, data, len);
+	if (put_len < len) {
+		/* DFU thread is not keeping up. Cancel transfer. */
+		sfts_dfu_thread_exit();
+		return -ECANCELED;
+	} else {
+		k_sem_give(&sfts_dfu_ctx.sem_rbuf);
+	}
 #else
+	/* Process data in this thread. */
 	int err = dfu_target_write(data, len);
 	if (err) {
 		return -ECANCELED;
@@ -258,11 +273,22 @@ static int first_image_segment_in(const u8_t *data, u16_t len)
 
 #if CONFIG_DFU_THREAD
 	/* Set up a separate thread for starting DFU. */
-	sfts_dfu_ctx.tid =
-		k_thread_create(&sfts_dfu_ctx.thread, dfu_thread_stack,
-				K_THREAD_STACK_SIZEOF(dfu_thread_stack),
-				sfts_dfu_thread, (void *) img_type, NULL, NULL,
-				CONFIG_DFU_THREAD_PRIO, 0, K_NO_WAIT);
+	__ASSERT(!sfts_dfu_ctx.thread_alive,
+		 "Old DFU thread was not terminated properly");
+	__ASSERT(ring_buf_is_empty(&sfts_dfu_ctx.rbuf),
+		 "sfts_dfu_ctx.rbuf was not init/reset before transfer");
+
+	k_sem_reset(&sfts_dfu_ctx.sem_rbuf);
+	k_sem_reset(&sfts_dfu_ctx.sem_exit);
+
+	sfts_dfu_ctx.thread_alive = true;
+	sfts_dfu_ctx.thread_exit = false;
+
+	printk("Starting DFU thread\n");
+	k_thread_create(&sfts_dfu_ctx.thread, dfu_thread_stack,
+			K_THREAD_STACK_SIZEOF(dfu_thread_stack),
+			sfts_dfu_thread, (void *) img_type, NULL, NULL,
+			CONFIG_DFU_THREAD_PRIO, 0, K_NO_WAIT);
 #else
 	/* Start DFU in this thread. */
 	int err = sfts_dfu_start(img_type);
@@ -285,12 +311,18 @@ static int on_sfts_new(struct bt_conn *conn, const u32_t file_size)
 	__ASSERT_NO_MSG(sfts_dfu_ctx.conn != conn);
 
 	if (sfts_dfu_ctx.conn == NULL) {
+#if CONFIG_DFU_THREAD
+		if (sfts_dfu_ctx.thread_alive) {
+			printk("Old DFU thread appears to be still running\n");
+			return -ECANCELED;
+		}
+#endif
 		sfts_dfu_ctx.state = SFTS_DFU_STATE_WAITING_FOR_FIRST_SEGMENT;
 		sfts_dfu_ctx.conn = bt_conn_ref(conn);
 		sfts_dfu_ctx.file_size = file_size;
 		sfts_dfu_ctx.current_crc = 0;
 
-		printk("DFU transfer started\n");
+		printk("DFU transfer started (file size: %d)\n", file_size);
 		return 0;
 	}
 	return -ECANCELED;
@@ -321,6 +353,10 @@ static int on_sfts_complete(struct bt_conn *conn, const u32_t crc)
 {
 	__ASSERT_NO_MSG(sfts_dfu_ctx.state != SFTS_DFU_STATE_IDLE);
 	__ASSERT_NO_MSG(sfts_dfu_ctx.conn == conn);
+
+#if CONFIG_DFU_THREAD
+	sfts_dfu_thread_exit();
+#endif
 
 	if (sfts_dfu_ctx.state == SFTS_DFU_STATE_TRANSFER_IN_PROGRESS &&
 	    sfts_dfu_ctx.current_crc == crc) {
@@ -364,6 +400,14 @@ void main(void)
 {
 	printk("Starting Peripheral UART DFU example\n");
 
+#if CONFIG_DFU_THREAD
+	ring_buf_init(&sfts_dfu_ctx.rbuf, CONFIG_DFU_THREAD_BUF_SIZE,
+		      sfts_dfu_ctx.rbuf_internal);
+
+	k_sem_init(&sfts_dfu_ctx.sem_rbuf, 0, 1);
+	k_sem_init(&sfts_dfu_ctx.sem_exit, 0, 1);
+#endif
+
 	RETURN_ON_ERROR(bt_enable(NULL),
 			"Bluetooth enabling failed");
 	RETURN_ON_ERROR(bt_gatt_stfs_init(&stfs_callbacks),
@@ -382,16 +426,7 @@ void main(void)
 					ARRAY_SIZE(ad), NULL, 0),
 			"Advertising failed to start");
 
-	boot_write_img_confirmed();
-
 	printk("Advertising successfully started\n");
-
-#if CONFIG_DFU_THREAD
-	ring_buf_init(&sfts_dfu_ctx.rbuf, CONFIG_DFU_THREAD_BUF_SIZE,
-		      sfts_dfu_ctx.rbuf_internal);
-	k_sem_init(&sfts_dfu_ctx.sem_rbuf, 0, 1);
-	k_sem_init(&sfts_dfu_ctx.sem_exit, 0, 1);
-#endif
 
 	boot_write_img_confirmed();
 }

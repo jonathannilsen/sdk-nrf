@@ -15,15 +15,20 @@ config DFU_THREAD
 	  storing a DFU image. Data transferred over GATT will be copied to
 	  a ring buffer in order to minimize blocking of the BT RX thread.
 	  If disabled, all DFU processing will remain in the BT RX thread,
-	  which can be more efficient, but is risky.
+	  which can be more efficient but less safe.
 
 config DFU_THREAD_PRIO
 	int "Priority level of the DFU thread"
 	default 0
 	depends on DFU_THREAD
 
+config DFU_THREAD_STACK_SIZE
+	int "Size of the stack used by the DFU thread"
+	default 512
+	depends on DFU_THREAD
+
 config DFU_THREAD_BUF_SIZE
-	int "Size (in bytes) of the ring buffer used by the DFU thread"
+	int "Size of the ring buffer used by the DFU thread"
 	default 512
 	depends on DFU_THREAD
 
