@@ -156,6 +156,7 @@ static void sfts_dfu_thread_cleanup(void)
 {
 	/* Wake up the thread from which 'sfts_dfu_thread_exit' was called. */
 	k_sem_give(&sfts_dfu_ctx.sem_exit);
+	k_yield();
 
 	/* Reset rbuf in this thread because memset is costly. */
 	ring_buf_reset(&sfts_dfu_ctx.rbuf);
