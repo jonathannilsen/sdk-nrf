@@ -1,3 +1,16 @@
+/*
+ * Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ */
+
+/** @file dfu_target_uart.h
+ *
+ * @defgroup dfu_target_uart UART DFU Target
+ * @{
+ * @brief DFU Target for upgrades performed over UART
+ */
+
 #ifndef DFU_TARGET_UART_H__
 #define DFU_TARGET_UART_H__
 
@@ -22,3 +35,5 @@ int dfu_target_uart_write(const void *const buf, size_t len);
 int dfu_target_uart_done(bool successful);
 
 #endif /* DFU_TARGET_UART_H__ */
+
+/**@} */

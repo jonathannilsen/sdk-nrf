@@ -1,9 +1,15 @@
+/*
+ * Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ */
+
 #include <zephyr.h>
 #include <sys/crc.h>
 #include <sys/printk.h>
 #include <sys/ring_buffer.h>
 #include <string.h>
-#include <dfu/mcuboot.h>
+
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>
 #include <dfu/dfu_target.h>

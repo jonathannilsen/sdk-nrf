@@ -1,12 +1,18 @@
+/*
+ * Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ */
+
+#ifndef BT_GATT_SFTS_H_
+#define BT_GATT_SFTS_H_
+
 /**
  * @file
  * @defgroup bt_gatt_sfts BLE GATT Simple File Transfer Service API
  * @{
  * @brief API for the BLE GATT Simple File Transfer Service.
  */
-
-#ifndef BT_GATT_SFTS_H_
-#define BT_GATT_SFTS_H_
 
 #include <bluetooth/uuid.h>
 #include <bluetooth/conn.h>
