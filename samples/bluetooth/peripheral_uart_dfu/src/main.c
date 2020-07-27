@@ -3,6 +3,7 @@
 #include <sys/printk.h>
 #include <logging/log.h>
 #include <string.h>
+#include <dfu/mcuboot.h>
 #include <uart_dfu.h>
 #include <uart_dfu_target_server.h>
 #include <bluetooth/bluetooth.h>
@@ -92,6 +93,8 @@ void main(void)
 	RETURN_ON_ERROR(bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad,
 					ARRAY_SIZE(ad), NULL, 0),
 			"Advertising failed to start");
+
+	boot_write_img_confirmed();
 
 	printk("Advertising successfully started\n");
 }
