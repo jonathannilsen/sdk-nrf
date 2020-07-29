@@ -167,6 +167,11 @@ static void sfts_dfu_thread_cleanup(void)
 	/* Reset rbuf in this thread because memset is costly. */
 	ring_buf_reset(&sfts_dfu_ctx.rbuf);
 	sfts_dfu_ctx.thread_alive = false;
+
+	/* Give semaphore again in case 'sfts_dfu_thread_exit'
+	 * is called again before 'thread_alive' can be cleared.
+	 */
+	k_sem_give(&sfts_dfu_ctx.sem_exit);
 }
 
 /**
@@ -225,8 +230,12 @@ static void sfts_dfu_thread(void *p1, void *p2, void *p3)
 }
 
 /* This function is to be called outside of DFU thread. */
-static void sfts_dfu_thread_exit(void)
+static void sfts_dfu_thread_exit(bool wait_for_exit)
 {
+	if (!sfts_dfu_ctx.thread_alive) {
+		return;
+	}
+
 	printk("Terminating DFU thread\n");
 
 	/* Set flag to signal a graceful exit out of thread loop. */
@@ -235,8 +244,9 @@ static void sfts_dfu_thread_exit(void)
 	/* Wake up thread in case it is stuck waiting for semaphore. */
 	k_sem_give(&sfts_dfu_ctx.sem_rbuf);
 
-	/* Wait until thread exits loop. */
-	k_sem_take(&sfts_dfu_ctx.sem_exit, K_FOREVER);
+	if (wait_for_exit) {
+		k_sem_take(&sfts_dfu_ctx.sem_exit, K_FOREVER);
+	}
 }
 #endif /* CONFIG_DFU_THREAD */
 
@@ -247,7 +257,7 @@ static int next_image_segment_in(const u8_t *data, u16_t len)
 	u32_t put_len = ring_buf_put(&sfts_dfu_ctx.rbuf, data, len);
 	if (put_len < len) {
 		/* DFU thread is not keeping up. Cancel transfer. */
-		sfts_dfu_thread_exit();
+		sfts_dfu_thread_exit(false);
 		return -ECANCELED;
 	} else {
 		k_sem_give(&sfts_dfu_ctx.sem_rbuf);
@@ -362,7 +372,7 @@ static int on_sfts_complete(struct bt_conn *conn, const u32_t crc)
 	__ASSERT_NO_MSG(sfts_dfu_ctx.conn == conn);
 
 #if CONFIG_DFU_THREAD
-	sfts_dfu_thread_exit();
+	sfts_dfu_thread_exit(true);
 #endif
 
 	if (sfts_dfu_ctx.state == SFTS_DFU_STATE_TRANSFER_IN_PROGRESS &&
@@ -385,7 +395,7 @@ static void on_sfts_abort(struct bt_conn *conn)
 	__ASSERT_NO_MSG(sfts_dfu_ctx.conn == conn);
 
 #if CONFIG_DFU_THREAD
-	sfts_dfu_thread_exit();
+	sfts_dfu_thread_exit(true);
 #endif
 
 	(void) sfts_dfu_stop(false);
@@ -427,7 +437,7 @@ void main(void)
 	RETURN_ON_ERROR(uart_dfu_target_server_enable(&target_server),
 			"Failed to enable UART DFU server");
 
-	printk("UART DFU server enabled\n");
+	printk("UART DFU target server enabled\n");
 
 	RETURN_ON_ERROR(bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad,
 					ARRAY_SIZE(ad), NULL, 0),
