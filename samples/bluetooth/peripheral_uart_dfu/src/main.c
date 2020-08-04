@@ -19,11 +19,14 @@
 #include <bluetooth/conn.h>
 #include "sfts.h"
 
-#define RETURN_ON_ERROR(_err, _msg)		\
-if (_err) {					\
-	printk("%s (err %d)\n", _msg, _err);	\
-	return;					\
-}
+#define RETURN_ON_ERROR(_expr, _msg)			\
+do {							\
+	int _err = (_expr);				\
+	if (_err) {					\
+		printk("%s (err %d)\n", (_msg), _err);	\
+		return;					\
+	}						\
+} while (0);
 
 /* Taken from dfu_target.c */
 #define IDENTIFY_BUF_SIZE 32
