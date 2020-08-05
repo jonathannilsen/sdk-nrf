@@ -1,8 +1,9 @@
 /*
- * Copyright (c) 2019 Nordic Semiconductor ASA
+ * Copyright (c) 2020 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
+
 #include <zephyr.h>
 #include <drivers/gpio.h>
 #include <drivers/flash.h>

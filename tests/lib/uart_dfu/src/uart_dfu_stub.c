@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ */
+
 /* needed here so the static device_get_binding does not get renamed */
 #include <device.h>
 #include <drivers/uart.h>
