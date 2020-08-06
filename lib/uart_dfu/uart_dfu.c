@@ -122,17 +122,17 @@ struct uart_dfu {
 	DT_HAS_CHOSEN(prop)
 
 #define UART_DFU_INSTANCE_ENABLED(idx) \
-	__UART_DFU_INSTANCE_ENABLED(uart_dfu_uart_inst_##idx)
+	__UART_DFU_INSTANCE_ENABLED(nordic_uart_dfu_##idx)
 
 #define __UART_DFU_INSTANCE_SUPPORTED(prop) \
 	DT_NODE_HAS_COMPAT_STATUS(DT_CHOSEN(prop), nordic_nrf_uarte, okay)
 
 #define UART_DFU_INSTANCE_SUPPORTED(idx) \
-	__UART_DFU_INSTANCE_SUPPORTED(uart_dfu_uart_inst_##idx)
+	__UART_DFU_INSTANCE_SUPPORTED(nordic_uart_dfu_##idx)
 
 #define UART_DFU_INSTANCE_DEF(idx) \
 	static const char state_##idx##_label[] = \
-		DT_LABEL(DT_CHOSEN(uart_dfu_uart_inst_##idx)); \
+		DT_LABEL(DT_CHOSEN(nordic_uart_dfu_##idx)); \
 	K_THREAD_STACK_DEFINE(state_##idx##_stack_area, UART_DFU_STACK_SIZE); \
 	static struct uart_dfu state_##idx = { \
 		.label = state_##idx##_label, \

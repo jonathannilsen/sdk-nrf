@@ -1,7 +1,7 @@
 / {
 	chosen {
-		uart-dfu,uart-inst-0=&uart1;
-		uart-dfu,uart-inst-1=&uart2;
+		nordic,uart-dfu-0=&uart1;
+		nordic,uart-dfu-1=&uart2;
 	};
 };
 

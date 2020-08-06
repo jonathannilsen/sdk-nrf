@@ -23,7 +23,6 @@ static const u8_t uart_header_magic[] = {
 };
 
 static dfu_target_callback_t callback = NULL;
-
 static struct uart_dfu_cli cli;
 static atomic_t byte_counter = 0;
 static atomic_t initialized = 0;
@@ -82,7 +81,7 @@ static int cli_init(void)
 	if (err != 0) {
 		return err;
 	}
-	return uart_dfu_cli_bind(CONFIG_DFU_TARGET_UART_INSTANCE_IDX, &cli);
+	return uart_dfu_cli_bind(CONFIG_DFU_TARGET_UART_INSTANCE, &cli);
 }
 
 
@@ -111,7 +110,7 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 		}
 	}
 
-	err = uart_dfu_cli_init_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+	err = uart_dfu_cli_init_send(CONFIG_DFU_TARGET_UART_INSTANCE,
 				     file_size);
 	if (err != 0) {
 		return err;
@@ -125,7 +124,7 @@ int dfu_target_uart_offset_get(size_t * offset)
 {
 	int err;
 
-	err = uart_dfu_cli_offset_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
+	err = uart_dfu_cli_offset_send(CONFIG_DFU_TARGET_UART_INSTANCE);
 	if (err != 0) {
 		return err;
 	}
@@ -165,7 +164,7 @@ int dfu_target_uart_write(const void * const buf, size_t len)
 		data_len = len;
 	}
 
-	err = uart_dfu_cli_write_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+	err = uart_dfu_cli_write_send(CONFIG_DFU_TARGET_UART_INSTANCE,
 				      data,
 				      data_len);
 	if (err != 0) {
@@ -183,7 +182,7 @@ int dfu_target_uart_done(bool successful)
 	/* TODO: better handling of cases where this is called at weird times.
 			 e.g. call uart_dfu_cli_stop() if necessary. */
 
-	err = uart_dfu_cli_done_send(CONFIG_DFU_TARGET_UART_INSTANCE_IDX,
+	err = uart_dfu_cli_done_send(CONFIG_DFU_TARGET_UART_INSTANCE,
 				     successful);
 	if (err != 0) {
 		goto cleanup;
@@ -193,7 +192,7 @@ int dfu_target_uart_done(bool successful)
 	err = status_res;
 
 cleanup:
-	err = uart_dfu_cli_stop(CONFIG_DFU_TARGET_UART_INSTANCE_IDX);
+	err = uart_dfu_cli_stop(CONFIG_DFU_TARGET_UART_INSTANCE);
 	if (err == -EINPROGRESS) {
 		k_sem_take(&dfu_target_uart_sem, K_FOREVER);
 	}

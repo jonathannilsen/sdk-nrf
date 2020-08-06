@@ -38,12 +38,11 @@ config DFU_TARGET_UART
 	help
 	  Enable support for updates sent over UART.
 
-# FIXME: better description
-config DFU_TARGET_UART_INSTANCE_IDX
-	int "Instance index to use for the UART DFU library."
+config DFU_TARGET_UART_INSTANCE
+	int "Instance number to use for the UART DFU library."
 	depends on DFU_TARGET_UART
 	help
-	  Sets the instance index used to identify the UART instance to use
+	  Sets the instance number used to identify the UART instance to use
 	  for UART DFU. See uart_dfu for more information. DFU_TARGET_UART
 	  is only supported on one UART instance.
 

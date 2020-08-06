@@ -1,6 +1,6 @@
 / {
 	chosen {
-		uart-dfu,uart-inst-0=&uart1;
+		nordic,uart-dfu-0=&uart1;
 	};
 };
 
