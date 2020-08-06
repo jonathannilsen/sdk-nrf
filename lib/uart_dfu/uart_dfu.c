@@ -45,9 +45,6 @@
 							   (seg_size)))
 #define RX_FRAME_SIZE(curr_size)	(curr_size + 1)
 
-#define RX_TIMEOUT_MARGIN		5000 /* ms */	
-#define TX_TIMEOUT_MARGIN		500 /* ms */			
-
 /* FIXME: Measure correct stack size. */
 #define UART_DFU_STACK_SIZE		1024
 
@@ -96,7 +93,6 @@ struct tx_dis_info {
 struct uart_dfu {
 	const char *const label;
 	struct device *dev;
-	u32_t baudrate;	
 
 	atomic_t rx;
 	atomic_t tx;
@@ -287,13 +283,6 @@ static inline int byte_duration_get(int baudrate, int bytes)
 	return ceiling_fraction(bytes * 8 * MSEC_PER_SEC, baudrate);
 }
 
-static inline int timeout_get(struct uart_dfu *dev, int bytes, int margin)
-{
-	/* XXX: do we need to assert that the baudrate is within bounds? */
-	int baudrate = (int) dev->baudrate;
-	return byte_duration_get(baudrate, bytes) + margin;
-}
-
 
 /*
  * Instance helper functions 
@@ -369,18 +358,6 @@ static int inst_abort_check(struct uart_dfu_inst *inst,
 	}
 }
 
-static int inst_rx_timeout_get(struct uart_dfu_inst *inst, int bytes)
-{
-	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
-	return timeout_get(dev, bytes, RX_TIMEOUT_MARGIN);
-}
-
-static int inst_tx_timeout_get(struct uart_dfu_inst *inst, int bytes)
-{
-	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
-	return timeout_get(dev, bytes, TX_TIMEOUT_MARGIN);
-}
-
 static bool inst_tx_rdy(struct uart_dfu_inst *inst)
 {
 	return atomic_test_bit(&inst->flags, FLAG_TX_RDY);
@@ -389,17 +366,18 @@ static bool inst_tx_rdy(struct uart_dfu_inst *inst)
 static int inst_tx_start(struct uart_dfu_inst *inst)
 {
 	int err;
-	size_t tx_timeout;
 	struct uart_dfu *dev = (struct uart_dfu *) inst->mod_ctx;
 
-	tx_timeout = inst_tx_timeout_get(inst, inst->tx_size);
 	LOG_DBG("%s enabling TX (size=%u, timeout=%d)",
 		dev->label,
 		inst->tx_size,
-		tx_timeout);
+		CONFIG_UART_DFU_SEND_TIMEOUT);
 
 	atomic_set_bit(&inst->flags, FLAG_TX_ACTIVE);
-	err = uart_tx(dev->dev, inst->tx_buf, inst->tx_size, tx_timeout);
+	err = uart_tx(dev->dev,
+		      inst->tx_buf,
+		      inst->tx_size,
+		      CONFIG_UART_DFU_SEND_TIMEOUT);
 	if (err != 0) {
 		atomic_clear_bit(&inst->flags, FLAG_TX_ACTIVE);
 		LOG_ERR("%s error enabling TX: %d", dev->label, err);
@@ -683,10 +661,9 @@ static u32_t cli_rx_size_get(struct uart_dfu_cli *cli)
 
 static void cli_rsp_timeout_set(struct uart_dfu_cli *cli)
 {
-	int timeout;
 	if (inst_recv_active(&cli->inst)) {
-		timeout = inst_rx_timeout_get(&cli->inst, RX_NORMAL_SIZE);
-		inst_recv_timeout_set(&cli->inst, timeout);
+		inst_recv_timeout_set(&cli->inst,
+				      CONFIG_UART_DFU_RESPONSE_TIMEOUT);
 	}
 }
 
@@ -871,9 +848,7 @@ static u32_t srv_rx_size_get(struct uart_dfu_srv *srv)
 
 static void srv_seg_timeout_set(struct uart_dfu_srv *srv)
 {
-	size_t seg_size = seg_size_out_next(&srv->fragment);
-	int timeout = inst_rx_timeout_get(&srv->inst, RX_WRITE_SIZE(seg_size));
-	inst_recv_timeout_set(&srv->inst, timeout);
+	inst_recv_timeout_set(&srv->inst, CONFIG_UART_DFU_RESPONSE_TIMEOUT);
 }
 
 static int srv_recv_init_handle(struct uart_dfu_srv *srv,
@@ -1499,6 +1474,7 @@ int uart_dfu_init(size_t idx)
 	int err;
 	struct uart_dfu *dev;
 	struct uart_config cfg;
+	int min_timeout;
 
 	dev = dfu_device_get(idx);
 	if (dev == NULL) {
@@ -1523,7 +1499,12 @@ int uart_dfu_init(size_t idx)
 		dev->dev = NULL;
 		return -EIO;
 	}
-	dev->baudrate = cfg.baudrate;
+
+	min_timeout = byte_duration_get(cfg.baudrate, COBS_MAX_BYTES);
+	if (CONFIG_UART_DFU_RESPONSE_TIMEOUT < min_timeout ||
+	    CONFIG_UART_DFU_SEND_TIMEOUT < min_timeout) {
+		return -EINVAL;
+	}
 
 	err = uart_callback_set(dev->dev, uart_async_cb, dev);
 	if (err != 0) {

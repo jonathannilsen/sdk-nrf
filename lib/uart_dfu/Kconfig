@@ -32,6 +32,14 @@ config UART_DFU_LIBRARY_THREAD_PRIO
 	default 0 if !MULTITHREADING
 	default 10
 
+config UART_DFU_RESPONSE_TIMEOUT
+	int "UART DFU library response timeout (ms)"
+	default 10000
+
+config UART_DFU_SEND_TIMEOUT
+	int "UART DFU library send timeout (ms)"
+	default 1000
+
 module=UART_DFU_LIBRARY
 module-str=UART DFU library
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
