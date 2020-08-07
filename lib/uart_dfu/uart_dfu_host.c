@@ -27,6 +27,12 @@ LOG_MODULE_REGISTER(uart_dfu_host, CONFIG_UART_DFU_HOST_LOG_LEVEL);
 * Static functions
 *****************************************************************************/
 
+static void state_reset(struct uart_dfu_host *host)
+{
+	(void) atomic_set(&host->file_size, 0);
+	(void) atomic_set(&host->initialized, 0);
+}
+
 static void target_evt_handle(enum dfu_target_evt_id evt_id)
 {
 	switch (evt_id) {
@@ -45,54 +51,20 @@ static int srv_init_handle(size_t file_size, void *context)
 {
 	struct uart_dfu_host *host = (struct uart_dfu_host *) context;
 
+	if (file_size == 0) {
+		return -EINVAL;
+	}
 	if (atomic_cas(&host->file_size, 0, file_size)) {
 		LOG_INF("Initialized(file_size=%u)", file_size);
 		return 0;
-	} else   {
+	} else {
 		LOG_ERR("Initialize failed: busy.");
 		return -EBUSY;
 	}
 }
 
-static int srv_write_handle(const u8_t *const fragment_buf,
-			    size_t fragment_size,
-			    void *context)
-{
-	/* Init, write */
-	int err;
-	struct uart_dfu_host *host = (struct uart_dfu_host *) context;
-
-	LOG_INF("Write(fragment_size=%u)", fragment_size);
-
-	if (atomic_cas(&host->initialized, 0, 1)) {
-		/* First fragment, initialize. */
-		int img_type;
-
-		img_type = dfu_target_img_type(fragment_buf, fragment_size);
-		if (img_type < 0) {
-			LOG_INF("dfu_target_img_type result: %d", img_type);
-			return img_type;
-		}
-
-		err = dfu_target_init(img_type,
-				      host->file_size,
-				      target_evt_handle);
-		if (err < 0) {
-			LOG_INF("dfu_target_init result: %d", err);
-			return err;
-		}
-	}
-
-	err = dfu_target_write(fragment_buf, fragment_size);
-
-	LOG_INF("dfu_target_write result: %d", err);
-
-	return err;
-}
-
 static int srv_offset_handle(size_t *offset, void *context)
 {
-	int err;
 	struct uart_dfu_host *host = (struct uart_dfu_host *) context;
 
 	LOG_INF("Offset()");
@@ -103,10 +75,39 @@ static int srv_offset_handle(size_t *offset, void *context)
 		return 0;
 	}
 
-	err = dfu_target_offset_get(offset);
-	/* XXX: Should we handle -EACCES here?
-	    We may see it if dfu_target is used from another context. */
-	return err;
+	return dfu_target_offset_get(offset);
+}
+
+static int srv_write_handle(const u8_t *const fragment_buf,
+			    size_t fragment_size,
+			    void *context)
+{
+	int err;
+	struct uart_dfu_host *host = (struct uart_dfu_host *) context;
+
+	LOG_INF("Write(fragment_size=%u)", fragment_size);
+
+	if (atomic_get(&host->file_size) == 0) {
+		/* Write received without init first */
+		return -EACCES;
+	}
+	if (atomic_cas(&host->initialized, 0, 1)) {
+		/* First fragment, initialize. */
+		int img_type;
+
+		img_type = dfu_target_img_type(fragment_buf, fragment_size);
+		if (img_type < 0) {
+			return img_type;
+		}
+
+		err = dfu_target_init(img_type,
+				      host->file_size,
+				      target_evt_handle);
+		if (err < 0) {
+			return err;
+		}
+	}
+	return dfu_target_write(fragment_buf, fragment_size);
 }
 
 static int srv_done_handle(bool successful, void *context)
@@ -117,16 +118,27 @@ static int srv_done_handle(bool successful, void *context)
 	LOG_INF("Done(successful=%u)", successful);
 
 	err = dfu_target_done(successful);
-	(void) atomic_set(&host->file_size, 0);
-	(void) atomic_set(&host->initialized, 0);
-
+	if (err == 0 && successful) {
+		state_reset(host);
+	}
 	return err;
 }
 
 static void srv_error_handle(int error, void *context)
 {
+	struct uart_dfu_host *host = (struct uart_dfu_host *) context;
+
 	LOG_ERR("Error(error=%d)", error);
-	/* TODO: dfu_target_reset or similar? */
+
+	/* TODO: this should run on session timeout */
+#if 0
+	if (atomic_get(&host->initialized)) {
+		(void) dfu_target_reset();
+		state_reset(host);
+	} else if (atomic_get(&host->file_size)) {
+		state_reset(host);
+	}
+#endif
 }
 
 
@@ -143,8 +155,7 @@ int uart_dfu_host_init(struct uart_dfu_host *host, size_t idx)
 		return -EINVAL;
 	}
 
-	(void) atomic_set(&host->file_size, 0);
-	(void) atomic_set(&host->initialized, 0);
+	state_reset(host);
 	host->idx = idx;
 	
 	callbacks.init_cb = srv_init_handle;
@@ -161,32 +172,24 @@ int uart_dfu_host_init(struct uart_dfu_host *host, size_t idx)
 	if (err != 0) {
 		return err;
 	}
-	err = uart_dfu_srv_bind(idx, &host->server);
-	return err;
+
+	return uart_dfu_srv_bind(idx, &host->srv);
 }
 
 int uart_dfu_host_enable(struct uart_dfu_host *host)
 {
-	int err;
-
 	if (host == NULL) {
 		return -EINVAL;
 	}
 
-	err = uart_dfu_srv_enable(host->idx);
-
-	return err;
+	return uart_dfu_srv_enable(host->idx);
 }
 
 int uart_dfu_host_disable(struct uart_dfu_host *host)
 {
-	int err;
-
 	if (host == NULL) {
 		return -EINVAL;
 	}
 
-	err = uart_dfu_srv_disable(host->idx);
-
-	return err;
+	return uart_dfu_srv_disable(host->idx);
 }

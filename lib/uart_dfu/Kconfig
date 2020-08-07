@@ -57,7 +57,7 @@ config UART_DFU_HOST_MAX_FRAGMENT_SIZE
 	default 2048
 
 module=UART_DFU_HOST
-module-str=UART DFU host 
+module-str=UART DFU host
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
 
 endmenu
