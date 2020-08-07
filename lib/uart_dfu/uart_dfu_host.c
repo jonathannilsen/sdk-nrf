@@ -13,9 +13,6 @@
 #include <uart_dfu_host.h>
 
 
-/* TODO: find a way to not do dfu_target calls from the uart_dfu
-   workqueue context. */
-
 /*****************************************************************************
 * Static variables
 *****************************************************************************/
@@ -35,12 +32,11 @@ static void state_reset(struct uart_dfu_host *host)
 
 static void target_evt_handle(enum dfu_target_evt_id evt_id)
 {
+	/* TODO: should these events be handled?  */
 	switch (evt_id) {
 	case DFU_TARGET_EVT_TIMEOUT:
-		/* TODO */
 		break;
 	case DFU_TARGET_EVT_ERASE_DONE:
-		/* TODO */
 		break;
 	default:
 		break;
@@ -69,8 +65,8 @@ static int srv_offset_handle(size_t *offset, void *context)
 
 	LOG_INF("Offset()");
 	if (atomic_get(&host->initialized) == 0) {
-		/* The target is not yet initialized,
-		   so we just return an offset of 0. */
+		/* The target is not yet initialized (first fragment
+		   not received), so we just return an offset of 0. */
 		*offset = 0;
 		return 0;
 	}
