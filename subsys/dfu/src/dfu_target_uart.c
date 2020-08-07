@@ -6,7 +6,6 @@
 
 #include <zephyr.h>
 #include <dfu/dfu_target.h>
-#include <pm_config.h>
 #include <logging/log.h>
 #include <sys/printk.h>
 #include <string.h>
@@ -111,7 +110,7 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 	}
 
 	err = uart_dfu_cli_init_send(CONFIG_DFU_TARGET_UART_INSTANCE,
-				     file_size);
+				     file_size - sizeof(uart_header_magic));
 	if (err != 0) {
 		return err;
 	}

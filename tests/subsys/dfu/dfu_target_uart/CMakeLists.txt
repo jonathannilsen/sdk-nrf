@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.13.1)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(json)
+project(dfu_target_test)
 
 FILE(GLOB app_sources src/*.c)
 target_sources(app PRIVATE ${app_sources})
@@ -19,14 +19,14 @@ target_sources(app
 
 target_include_directories(app
   PRIVATE
-  ${ZEPHYR_BASE}/../nrf/subsys/dfu/include
+  ${ZEPHYR_BASE}/../nrf/include
   ${ZEPHYR_BASE}/../nrf/include/dfu
-  . # To get pm_config.h
-  ${ZEPHYR_BASE}/../nrf/subsys/dfu/src
+  ${ZEPHYR_BASE}/../nrf/subsys/dfu/include
   )
 
 target_compile_options(app
   PRIVATE
-  -DCONFIG_IMG_BLOCK_BUF_SIZE=4096
   -DCONFIG_DFU_TARGET_LOG_LEVEL=2
+  -DCONFIG_DFU_TARGET_UART=1
+  -DCONFIG_DFU_TARGET_UART_INSTANCE=0
   )

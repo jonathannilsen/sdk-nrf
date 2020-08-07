@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import pylink # pip install pylink-square
 from sys import argv, exit
 
@@ -37,7 +38,7 @@ if __name__ == '__main__':
         jlink.flash_file(firmware_hex, ADDR_FIRMWARE);
 
         print(f'Flashing {data_bin:}...')
-        jlink.flash_file(data_bin, ADDR_SFTS_DATA);
+        jlink.flash_file(data_bin, ADDR_SFTS_DATA)
 
         size, crc = 0, 0xFFFFFFFF
         with open(data_bin, 'rb') as file:
@@ -45,7 +46,7 @@ if __name__ == '__main__':
                 try:
                     byte = file.read(1)[0]
                     size += 1
-                    crc ^= byte;
+                    crc ^= byte
                     for _ in range(8):
                         crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1))
                 except IndexError:

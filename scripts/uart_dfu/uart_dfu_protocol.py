@@ -17,6 +17,79 @@ def log_error(msg):
 def log_bytes(msg, data):
     print("{}: [{}]".format(msg, ", ".join(f"{b:X}" for b in data)))
 
+
+class CobsDecodeError(ValueError):
+    pass
+
+
+class CobsCoder:
+    STATE_WAIT = 0
+    STATE_DECODE = 1
+    STATE_INVALID = 2
+
+    DELIMITER = 0
+    MAX_BYTES = 255
+    OVERHEAD_BYTES = 2
+    MAX_DATA_BYTES = MAX_BYTES - OVERHEAD_BYTES
+
+    def __init__(self):
+        self.__decode_next_delimiter = 0
+        self.__decode_data = bytearray()
+        self.__decode_state = CobsCoder.STATE_WAIT
+
+    def encode(self, data : typing.ByteString):
+        for in_i in range(0, len(data), CobsCoder.MAX_DATA_BYTES):
+            decoded_length = min(len(data) - in_i, CobsCoder.MAX_DATA_BYTES)
+            encoded_length = decoded_length + CobsCoder.OVERHEAD_BYTES
+            encoded = bytearray(encoded_length)
+            last_delimiter = 0
+            for j, b in enumerate(data[in_i:in_i + encoded_length]):
+                out_i = j - in_i + 1
+                if b == CobsCoder.DELIMITER:
+                    encoded[last_delimiter] = out_i 
+                    last_delimiter = out_i 
+                else:
+                    encoded[out_i] = b
+            encoded[last_delimiter] = encoded_length - 1
+            encoded[encoded_length - 1] = CobsCoder.DELIMITER
+            yield encoded
+                    
+    def decode(self, data : typing.ByteString):
+        for b in data:
+            if self.__decode_state == CobsCoder.STATE_WAIT:
+                if b != CobsCoder.DELIMITER:
+                    self.__decode_data.clear()
+                    self.__decode_next_delimiter = int(b)
+                    self.__decode_state = CobsCoder.STATE_DECODE
+            elif self.__decode_state == CobsCoder.STATE_DECODE:
+                if b != CobsCoder.DELIMITER:
+                    if self.__decode_next_delimiter - 1 == len(self.__decode_data):
+                        self.__decode_data.append(CobsCoder.DELIMITER)
+                        if b > len(self.__decode_data):
+                            self.__decode_next_delimiter = int(b)
+                        else:
+                            self.__decode_state = CobsCoder.STATE_INVALID
+                    else:
+                        self.__decode_data.append(b)
+                else:
+                    self.__decode_state = CobsCoder.STATE_WAIT
+                    yield self.__decode_data
+                    continue
+                
+                if len(self.__decode_data) >= CobsCoder.MAX_DATA_BYTES:
+                    self.__decode_state = CobsCoder.STATE_INVALID
+
+            else:
+                if b == CobsCoder.DELIMITER:
+                    self.__decode_state = CobsCoder.STATE_WAIT
+
+    def decode_reset(self):
+        self.__decode_next_delimiter = 0
+        self.__decode_data = bytearray()
+        self.__decode_state = CobsCoder.STATE_WAIT
+
+
+
 @dataclasses.dataclass
 class UartDfuStruct:
     def __bytes__(self):
@@ -44,7 +117,6 @@ class UartDfuStruct:
             if issubclass(t, ctypes.Structure) or issubclass(t, ctypes.Union):
                 field_values[i] = t.from_buffer_copy(bytes(v)) 
         return cls(*field_values)
-        
 
 
 class UartDfuHeader(ctypes.LittleEndianStructure):
@@ -84,6 +156,7 @@ class UartDfuWriteh(UartDfuStruct):
 class UartDfuWritec(UartDfuStruct):
     OPCODE = 0x02 
     FMT = "<1s{}s"
+    MAX_PAYLOAD_SIZE = CobsCoder.MAX_DATA_BYTES - 1
 
     header : UartDfuHeader = UartDfuHeader(OPCODE, 0)
     fragment_data : bytearray = bytearray() 
@@ -177,76 +250,6 @@ class UartDfuParser:
         except Exception as e:
             raise PduParseError(str(e))
 
-
-class CobsDecodeError(ValueError):
-    pass
-
-
-class CobsCoder:
-    STATE_WAIT = 0
-    STATE_DECODE = 1
-    STATE_INVALID = 2
-
-    DELIMITER = 0
-    MAX_BYTES = 255
-    OVERHEAD_BYTES = 2
-    MAX_DATA_BYTES = MAX_BYTES - OVERHEAD_BYTES
-
-    def __init__(self):
-        self.__decode_next_delimiter = 0
-        self.__decode_data = bytearray()
-        self.__decode_state = CobsCoder.STATE_WAIT
-
-    def encode(self, data : typing.ByteString):
-        for in_i in range(0, len(data), CobsCoder.MAX_DATA_BYTES):
-            decoded_length = min(len(data) - in_i, CobsCoder.MAX_DATA_BYTES)
-            encoded_length = decoded_length + CobsCoder.OVERHEAD_BYTES
-            encoded = bytearray(encoded_length)
-            last_delimiter = 0
-            for j, b in enumerate(data[in_i:in_i + encoded_length]):
-                out_i = j - in_i + 1
-                if b == CobsCoder.DELIMITER:
-                    encoded[last_delimiter] = out_i 
-                    last_delimiter = out_i 
-                else:
-                    encoded[out_i] = b
-            encoded[last_delimiter] = encoded_length - 1
-            encoded[encoded_length - 1] = CobsCoder.DELIMITER
-            yield encoded
-                    
-    def decode(self, data : typing.ByteString):
-        for b in data:
-            if self.__decode_state == CobsCoder.STATE_WAIT:
-                if b != CobsCoder.DELIMITER:
-                    self.__decode_data.clear()
-                    self.__decode_next_delimiter = int(b)
-                    self.__decode_state = CobsCoder.STATE_DECODE
-            elif self.__decode_state == CobsCoder.STATE_DECODE:
-                if b != CobsCoder.DELIMITER:
-                    if self.__decode_next_delimiter - 1 == len(self.__decode_data):
-                        self.__decode_data.append(CobsCoder.DELIMITER)
-                        if b > len(self.__decode_data):
-                            self.__decode_next_delimiter = int(b)
-                        else:
-                            self.__decode_state = CobsCoder.STATE_INVALID
-                    else:
-                        self.__decode_data.append(b)
-                else:
-                    self.__decode_state = CobsCoder.STATE_WAIT
-                    yield self.__decode_data
-                    continue
-                
-                if len(self.__decode_data) >= CobsCoder.MAX_DATA_BYTES:
-                    self.__decode_state = CobsCoder.STATE_INVALID
-
-            else:
-                if b == CobsCoder.DELIMITER:
-                    self.__decode_state = CobsCoder.STATE_WAIT
-
-    def decode_reset(self):
-        self.__decode_next_delimiter = 0
-        self.__decode_data = bytearray()
-        self.__decode_state = CobsCoder.STATE_WAIT
 
 """
 def test_cc():
@@ -350,6 +353,7 @@ class UartDfuClient:
         transport, protocol = await asyncio.wait_for(serial_coro, self.SERIAL_TIMEOUT)
         send = self.__send_function(protocol)
         recv = self.__receive_function(protocol_params.queue)
+        print(f"RTS: {transport.serial.rts}")
         try:
             print(f"Connected to {self.port}@{self.baudrate}")
             await coro(send, recv, *args, **kwargs)
@@ -359,24 +363,24 @@ class UartDfuClient:
     async def __update(self, send, recv, image_data, fragment_size):
         send(UartDfuInit(file_size=len(image_data)))
         await recv(self.RECEIVE_TIMEOUT)
-        await asyncio.sleep(1)
+        # await asyncio.sleep(1)
         for f_start in range(0, len(image_data), fragment_size):
             current_fragment_size = min(len(image_data) - f_start, fragment_size)
             f_end = f_start + current_fragment_size
             print(f"Uploading fragment starting at {f_start} with size {current_fragment_size}.")
             send(UartDfuWriteh(fragment_total_size=current_fragment_size))
             await recv(self.RECEIVE_TIMEOUT)
-            await asyncio.sleep(1)
-            for s_start in range(f_start, f_end, CobsCoder.MAX_DATA_BYTES - 1):
-                segment_size = min(f_end - s_start, CobsCoder.MAX_DATA_BYTES - 1)
+            # await asyncio.sleep(1)
+            for s_start in range(f_start, f_end, UartDfuWritec.MAX_PAYLOAD_SIZE):
+                segment_size = min(f_end - s_start, UartDfuWritec.MAX_PAYLOAD_SIZE)
                 segment_data = bytearray(image_data[s_start:s_start + segment_size])
                 send(UartDfuWritec(fragment_data=segment_data))
-                await asyncio.sleep(1)
+                # await asyncio.sleep(1)
             await recv(self.RECEIVE_TIMEOUT)
-            await asyncio.sleep(1)
+            # await asyncio.sleep(1)
         send(UartDfuDone(args=UartDfuDoneArgs(success=1)))
         await recv(self.RECEIVE_TIMEOUT)
-        await asyncio.sleep(1)
+        # await asyncio.sleep(1)
         print(f"Update done: sent {len(image_data)} bytes.")
         """
         except Exception as e:
