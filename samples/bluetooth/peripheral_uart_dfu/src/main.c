@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include <uart_dfu.h>
-#include <uart_dfu_target_server.h>
+#include <uart_dfu_host.h>
 #include <dfu/dfu_target.h>
 #include <dfu/mcuboot.h>
 
@@ -68,7 +68,7 @@ static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SFTS_UUID_SERVICE),
 };
 
-static struct uart_dfu_target_server target_server;
+static struct uart_dfu_host host;
 
 /*****************************************************************************
  * Static functions
@@ -435,9 +435,9 @@ void main(void)
 
 	printk("Bluetooth initialized\n");
 
-	RETURN_ON_ERROR(uart_dfu_target_server_init(&target_server, 0),
+	RETURN_ON_ERROR(uart_dfu_host_init(&host, 0),
 			"Failed to initialize UART DFU server");
-	RETURN_ON_ERROR(uart_dfu_target_server_enable(&target_server),
+	RETURN_ON_ERROR(uart_dfu_host_enable(&host),
 			"Failed to enable UART DFU server");
 
 	printk("UART DFU target server enabled\n");

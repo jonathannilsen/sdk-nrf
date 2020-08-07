@@ -18,10 +18,10 @@
 #include <net/fota_download.h>
 #include <dfu/mcuboot.h>
 #include <uart_dfu.h>
-#include <uart_dfu_target_server.h>
+#include <uart_dfu_host.h>
 
-#define UART_DFU_PC_INST_IDX	0
-#define UART_DFU_NRF52_INST_IDX	1
+#define UART_DFU_PC_INSTANCE	0
+#define UART_DFU_NRF52_INSTANCE	1
 #define LED_PORT		DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
 #define TLS_SEC_TAG 		42
 
@@ -30,8 +30,8 @@ static struct gpio_callback	gpio_cb;
 static atomic_t 		sw_pressed = ATOMIC_INIT(0);
 static struct k_work		fota_work;
 
-static struct uart_dfu_target_server target_server_pc;
-static struct uart_dfu_target_server target_server_nrf52;
+static struct uart_dfu_host	host_pc;
+static struct uart_dfu_host	host_nrf52;
 
 
 /**@brief Recoverable BSD library error. */
@@ -129,15 +129,13 @@ static void app_dfu_transfer_start(struct k_work *unused)
 					     sec_tag,
 					     CONFIG_DOWNLOAD_PORT,
 					     apn);
-	}
-	else if (sw_no == BIT(1)) {
+	} else if (sw_no == BIT(1)) {
 		retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
 					     CONFIG_DOWNLOAD_NRF52_FILE,
 					     sec_tag,
 					     CONFIG_DOWNLOAD_PORT,
 					     apn);
-	}
-	else {
+	} else {
 		retval = -EINVAL;
 	}
 	
@@ -202,8 +200,7 @@ void dfu_button_pressed(struct device *gpiob, struct gpio_callback *cb,
 	if (atomic_cas(&sw_pressed, 0, sw_bits)) {
 		dfu_buttons_disable();
 		k_work_submit(&fota_work);
-	}
-	else {
+	} else {
 		printk("FOTA start failed: busy.\n");
 	}
 }
@@ -323,27 +320,23 @@ static int application_init(void)
 		return err;
 	}
 
-	err = uart_dfu_target_server_init(&target_server_pc, UART_DFU_PC_INST_IDX);
-	if (err != 0)
-	{
+	err = uart_dfu_host_init(&host_pc, UART_DFU_PC_INSTANCE);
+	if (err != 0) {
 		return err;
 	}
 
-	err = uart_dfu_target_server_enable(&target_server_pc);
-	if (err != 0)
-	{
+	err = uart_dfu_host_enable(&host_pc);
+	if (err != 0) {
 		return err;
 	}
 
-	err = uart_dfu_target_server_init(&target_server_nrf52, UART_DFU_NRF52_INST_IDX);
-	if (err != 0)
-	{
+	err = uart_dfu_host_init(&host_nrf52, UART_DFU_NRF52_INSTANCE);
+	if (err != 0) {
 		return err;
 	}
 
-	err = uart_dfu_target_server_enable(&target_server_nrf52);
-	if (err != 0)
-	{
+	err = uart_dfu_host_enable(&host_nrf52);
+	if (err != 0) {
 		return err;
 	}
 

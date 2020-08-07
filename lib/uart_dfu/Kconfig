@@ -45,19 +45,19 @@ module-str=UART DFU library
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
 
 
-# UART DFU target server configuration
+# UART DFU host configuration
 
-config UART_DFU_TARGET_SERVER
-	bool "UART DFU target server"
+config UART_DFU_HOST
+	bool "UART DFU host"
 	depends on UART_DFU_LIBRARY
 	depends on DFU_TARGET
 
-config UART_DFU_TARGET_SERVER_MAX_FRAGMENT_SIZE
-	int "UART DFU target server maximum fragment size."
+config UART_DFU_HOST_MAX_FRAGMENT_SIZE
+	int "UART DFU host maximum fragment size."
 	default 2048
 
-module=UART_DFU_TARGET_SERVER
-module-str=UART DFU target server
+module=UART_DFU_HOST
+module-str=UART DFU host 
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
 
 endmenu
