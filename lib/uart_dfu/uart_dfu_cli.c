@@ -28,10 +28,9 @@ struct fragment_in {
 * Static variables
 *****************************************************************************/
 
-static atomic_t in_session		= ATOMIC_INIT(0);
-static atomic_t in_write		= ATOMIC_INIT(0);
-static atomic_t tx_state		= ATOMIC_INIT(0);
-static atomic_t rx_state 		= ATOMIC_INIT(OPCODE_NONE);
+static atomic_t api_avail		= ATOMIC_INIT(0);
+static bool in_write			= false;
+static int rx_opcode			= OPCODE_NONE;
 static struct fragment_in fragment 	= {0};
 static struct uart_dfu_cli_cb app_cb 	= {NULL};
 
@@ -74,6 +73,13 @@ static const uint8_t *fragment_read(size_t len)
 static bool fragment_done(void)
 {
 	return fragment.idx >= fragment.len;
+}
+
+static void state_reset(void)
+{
+	rx_opcode = OPCODE_NONE;
+	in_write = false;
+	fragment_init(NULL, 0);
 }
 
 static enum uart_dfu_cli_err err_type_get(int err)
@@ -135,7 +141,7 @@ static bool cli_write_seq_cont(void)
 	bool final = cli_writec_send();
 	if (final) {
 		/* Final segment - prepare to receive reply. */
-		atomic_set(&rx_state, UART_DFU_OPCODE_WRITEC);
+		rx_opcode = UART_DFU_OPCODE_WRITEC;
 		int err = uart_dfu_rx_start(
 			PDU_SIZE(sizeof(struct uart_dfu_status_args)));
 		__ASSERT(err == 0, "Unexpected UART error: %d.", err);
@@ -150,6 +156,7 @@ static bool cli_write_seq_cont(void)
 
 static void cli_recv_status_handle(const struct uart_dfu_pdu *pdu)
 {
+	(void) atomic_set(&api_avail, 1);
 	app_cb.status_cb(pdu->args.status.data.status);
 }
 
@@ -158,15 +165,17 @@ static void cli_recv_writeh_handle(const struct uart_dfu_pdu *pdu)
 	int status = pdu->args.status.data.status;
 
 	if (status == 0) {
-		(void) atomic_set(&in_write, 1);
+		in_write = true;
 		(void) cli_write_seq_cont();
 	} else {
+		(void) atomic_set(&api_avail, 1);
 		app_cb.status_cb(status);
 	}
 }
 
 static void cli_recv_offset_handle(const struct uart_dfu_pdu *pdu)
 {
+	(void) atomic_set(&api_avail, 1);
 	if (pdu->args.status.data.status < 0) {
 		app_cb.status_cb(pdu->args.status.data.status);
 	} else {
@@ -184,13 +193,14 @@ static void cli_recv_handle(const struct uart_dfu_pdu *const pdu,
 	int opcode = (int) pdu->hdr.opcode;
 	if (len != PDU_SIZE(sizeof(struct uart_dfu_status_args))	||
 	    !pdu->hdr.status 						||
-	    !atomic_cas(&rx_state, opcode, OPCODE_NONE)) {
+	    rx_opcode != opcode) {
 		/* Only accept status messages with the correct length
 		   and expected opcode. */
 		return;
 	}
-
+	
 	/* Received expected message; stop timeout */
+	rx_opcode = OPCODE_NONE;
 	uart_dfu_rx_timeout_stop();
 
 	switch (opcode) {
@@ -221,41 +231,34 @@ static void cli_recv_handle(const struct uart_dfu_pdu *const pdu,
 
 static void cli_send_handle(void)
 {
-	if (atomic_get(&in_write)) {
+	if (in_write) {
 		if (cli_write_seq_cont()) {
 			return;
 		} else {
-			(void) atomic_set(&in_write, 0);
+			in_write = false;
 		}
 	}
 
-	(void) atomic_set(&tx_state, 0);
 	(void) uart_dfu_rx_timeout_start(
 		CONFIG_UART_DFU_CLI_RESPONSE_TIMEOUT);
 }
 
 static void cli_recv_abort_handle(int err)
 {
-	(void) atomic_set(&rx_state, OPCODE_NONE);
 	LOG_DBG("Client receive aborted with err: %d", err);
 	uart_dfu_sess_close(UART_DFU_SESS_CLI, err);
 }
 
 static void cli_send_abort_handle(int err)
 {
-	(void) atomic_set(&in_write, 0);
-	(void) atomic_set(&tx_state, 0);
 	LOG_DBG("Client send aborted with err: %d.", err);
 	uart_dfu_sess_close(UART_DFU_SESS_CLI, err);
 }
 
 static void cli_sess_enter_handle(void)
 {
-	(void) atomic_set(&rx_state, OPCODE_NONE);
-	(void) atomic_set(&tx_state, 0);
-	(void) atomic_set(&in_write, 0);
-	fragment_init(NULL, 0);
-	atomic_set(&in_session, 1);
+	state_reset();	
+	(void) atomic_set(&api_avail, 1);
 
 	LOG_DBG("Client session started.");
 	evt_send(UART_DFU_CLI_EVT_STARTED, UART_DFU_CLI_SUCCESS);
@@ -263,11 +266,8 @@ static void cli_sess_enter_handle(void)
 
 static void cli_sess_exit_handle(int err)
 {
-	(void) atomic_set(&rx_state, OPCODE_NONE);
-	(void) atomic_set(&tx_state, 0);
-	(void) atomic_set(&in_write, 0);
-	fragment_init(NULL, 0);
-	atomic_set(&in_session, 0);
+	(void) atomic_set(&api_avail, 0);
+	state_reset();
 
 	LOG_DBG("Client session stopped.");
 	evt_send(UART_DFU_CLI_EVT_STOPPED, err_type_get(err));
@@ -283,32 +283,25 @@ static int api_cli_send(struct uart_dfu_pdu *pdu, size_t len)
 	int err;
 	int opcode = pdu->hdr.opcode;
 
-	if (!atomic_get(&in_session)) {
+	if (!atomic_cas(&api_avail, 1, 0)) {
 		return -EBUSY;
-	}
-	if (!atomic_cas(&tx_state, 0, 1)) {
-		return -EBUSY;
-	}
-	if (!atomic_cas(&rx_state, OPCODE_NONE, opcode)) {
-		goto cleanup_2;
 	}
 
+	rx_opcode = opcode;
 	err = uart_dfu_rx_start(PDU_SIZE(sizeof(struct uart_dfu_status_args)));
-	if (err != 0) {
-		goto cleanup_1;
-	}
-
-	err = cli_send(pdu, len);
 	if (err == 0) {
+		err = cli_send(pdu, len);
+		if (err != 0) {
+			(void) uart_dfu_rx_stop();
+		}
+	}
+	if (err != 0) {
+		rx_opcode = OPCODE_NONE;
+		(void) atomic_set(&api_avail, 1);
+		return -EBUSY;
+	} else {
 		return 0;
 	}
-
-	(void) uart_dfu_rx_stop();
-cleanup_1:
-	(void) atomic_set(&rx_state, OPCODE_NONE);
-cleanup_2:
-	(void) atomic_set(&tx_state, 0);
-	return -EBUSY;
 }
 
 
@@ -427,12 +420,8 @@ int uart_dfu_cli_done_send(bool successful)
 int uart_dfu_cli_start(void)
 {
 	int err = uart_dfu_sess_open(UART_DFU_SESS_CLI);
-	if (err == 0 || err == -EALREADY) {
-		if (atomic_get(&in_session)) {
-			return 0;
-		} else {
-			return -EINPROGRESS;
-		}
+	if (err == -EALREADY) {
+		return 0;
 	} else {
 		return err;
 	}

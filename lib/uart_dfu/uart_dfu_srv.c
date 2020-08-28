@@ -29,13 +29,13 @@ struct fragment_out {
 * Static variables
 *****************************************************************************/
 
-static atomic_t in_session		= ATOMIC_INIT(0);
-static atomic_t done_pending		= ATOMIC_INIT(0);
-static atomic_t rx_state		= ATOMIC_INIT(OPCODE_NONE);
+static bool done_pending		= false;
+static int rx_state			= OPCODE_NONE;
 static struct fragment_out fragment 	= {0};
 static struct uart_dfu_srv_cb app_cb 	= {NULL};
 
 LOG_MODULE_DECLARE(uart_dfu, CONFIG_UART_DFU_LIBRARY_LOG_LEVEL);
+
 
 /*****************************************************************************
 * Static functions
@@ -116,14 +116,17 @@ static int srv_send(struct uart_dfu_pdu *pdu, size_t len)
 
 static bool srv_accept(int opcode, int rx_next)
 {
-	return atomic_cas(&rx_state, OPCODE_ANY, rx_next) ||
-		atomic_cas(&rx_state, opcode, rx_next);
+	if (rx_state == OPCODE_ANY || rx_state == opcode) {
+		rx_state = rx_next;
+		return true;
+	} else {
+		return false;
+	}
 }
 
 static uint32_t rx_size_get(void)
 {
-	atomic_val_t opcode = atomic_get(&rx_state);
-	switch (opcode) {
+	switch (rx_state) {
 	case UART_DFU_OPCODE_WRITEC:
 		return sizeof(struct uart_dfu_hdr) + fragment_seg_len();
 	default:
@@ -192,9 +195,7 @@ static int srv_recv_writec_handle(const struct uart_dfu_pdu *pdu,
 {
 	size_t data_len = ARG_SIZE(len);
 
-	if (data_len == 0 || !atomic_cas(&rx_state,
-					UART_DFU_OPCODE_WRITEC,
-					UART_DFU_OPCODE_WRITEC)) {
+	if (data_len == 0 || rx_state != UART_DFU_OPCODE_WRITEC) {
 		return -ENOENT;
 	}
 
@@ -202,7 +203,7 @@ static int srv_recv_writec_handle(const struct uart_dfu_pdu *pdu,
 	int err = fragment_write(pdu->args.writec.data, data_len);
 	if (err == 0) {
 		/* Fragment done. */
-		(void) atomic_set(&rx_state, OPCODE_ANY);
+		rx_state = OPCODE_ANY;
 		int status = app_cb.write_cb(fragment.buf, fragment.len);
 		fragment_reset();
 		rsp->args.status.data.status = status;
@@ -212,7 +213,7 @@ static int srv_recv_writec_handle(const struct uart_dfu_pdu *pdu,
 		return -ENOENT;
 	} else {
 		/* Fragment size too large. */
-		(void) atomic_set(&rx_state, OPCODE_ANY);
+		rx_state = OPCODE_ANY;
 		fragment_reset();
 		return -ENOENT;
 	}
@@ -260,8 +261,8 @@ static int srv_recv_done_handle(struct uart_dfu_pdu *pdu,
 	}
 	if (srv_accept(pdu->hdr.opcode, OPCODE_ANY)) {
 		uart_dfu_rx_timeout_stop();
-		atomic_set(&done_pending, 1);
-		(void) atomic_set(&rx_state, UART_DFU_OPCODE_INIT);
+		done_pending = true;
+		rx_state = UART_DFU_OPCODE_INIT;
 		int status = app_cb.done_cb((bool) pdu->args.done.success);
 		rsp->args.status.data.status = status;
 		return 0;
@@ -325,7 +326,7 @@ static void srv_recv_handle(struct uart_dfu_pdu *pdu, size_t len)
 
 static void srv_send_handle(void)
 {
-	if (atomic_get(&done_pending)) {
+	if (done_pending) {
 		(void) uart_dfu_sess_close(UART_DFU_SESS_SRV,
 					UART_DFU_SRV_SUCCESS);
 	} else {
@@ -336,7 +337,6 @@ static void srv_send_handle(void)
 
 static void srv_recv_abort_handle(int err)
 {
-	(void) atomic_set(&rx_state, OPCODE_NONE);
 	LOG_DBG("Server receive aborted with err: %d", err);
 	(void) uart_dfu_sess_close(UART_DFU_SESS_SRV, err_type_get(err));
 }
@@ -349,21 +349,18 @@ static void srv_send_abort_handle(int err)
 
 static void srv_sess_enter_handle(void)
 {
-	(void) atomic_set(&done_pending, 0);
-	(void) atomic_set(&in_session, 1);
-
+	done_pending = false;
 	LOG_DBG("Server session started.");
 	evt_send(UART_DFU_SRV_EVT_STARTED, UART_DFU_SRV_SUCCESS);
 }
 
 static void srv_sess_exit_handle(int err)
 {
-	(void) atomic_set(&done_pending, 0);
-	(void) atomic_set(&in_session, 0);
+	done_pending = false;
 	if (err != -ECONNABORTED) {
-		(void) atomic_set(&rx_state, UART_DFU_OPCODE_INIT);
+		rx_state = UART_DFU_OPCODE_INIT;
 	} else {
-		(void) atomic_set(&rx_state, OPCODE_NONE);
+		rx_state = OPCODE_NONE;
 	}
 	LOG_DBG("Server session stopped.");
 	evt_send(UART_DFU_SRV_EVT_STOPPED, err_type_get(err));
@@ -452,14 +449,16 @@ int uart_dfu_srv_init(uint8_t *fragment_buf,
 void uart_dfu_srv_enable(void)
 {
 	/* Accept INIT PDUs in the idle state. */
-	(void) atomic_cas(&rx_state, OPCODE_NONE, UART_DFU_OPCODE_INIT);
+	if (rx_state == OPCODE_NONE) {
+		rx_state = UART_DFU_OPCODE_INIT;
+	}
 }
 
 int uart_dfu_srv_disable(void)
 {
 	if (uart_dfu_sess_close(UART_DFU_SESS_SRV,
 				UART_DFU_SRV_ERR_ABORT) == -EFAULT) {
-		atomic_set(&rx_state, OPCODE_NONE);
+		rx_state = OPCODE_NONE;
 		return 0;
 	} else {
 		return -EINPROGRESS;

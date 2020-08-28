@@ -7,7 +7,6 @@
 #include <zephyr.h>
 #include <sys/printk.h>
 #include <logging/log.h>
-#include <sys/atomic.h>
 #include <uart_dfu.h>
 #include <dfu/dfu_target.h>
 #include <uart_dfu_host.h>
@@ -18,8 +17,8 @@
 * Static variables
 *****************************************************************************/
 
-static atomic_t initialized		= ATOMIC_INIT(0);
-static atomic_t total_size		= ATOMIC_INIT(0);
+static bool initialized			= false;
+static size_t total_size		= 0;
 static uint8_t fragment[CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE];
 
 static struct k_poll_signal sig_stop	= K_POLL_SIGNAL_INITIALIZER(sig_stop);
@@ -33,8 +32,8 @@ LOG_MODULE_REGISTER(uart_dfu_host, CONFIG_UART_DFU_HOST_LOG_LEVEL);
 
 static void state_reset(void)
 {
-	(void) atomic_set(&total_size, 0);
-	(void) atomic_set(&initialized, 0);
+	total_size = 0;
+	initialized = false;
 }
 
 static void target_evt_handle(enum dfu_target_evt_id evt_id)
@@ -55,7 +54,8 @@ static int srv_init_handle(size_t file_size)
 	if (file_size == 0) {
 		return -EINVAL;
 	}
-	if (atomic_cas(&total_size, 0, file_size)) {
+	if (total_size == 0) {
+		total_size = file_size;
 		LOG_INF("Initialized(file_size=%u)", file_size);
 		return 0;
 	} else {
@@ -68,7 +68,7 @@ static int srv_offset_handle(size_t *offset)
 {
 	LOG_INF("Offset()");
 
-	if (atomic_get(&initialized) == 0) {
+	if (!initialized) {
 		/* The target is not yet initialized (first fragment
 		   not received), so we just return an offset of 0. */
 		*offset = 0;
@@ -83,11 +83,11 @@ static int srv_write_handle(const uint8_t *const fragment_buf,
 {
 	LOG_INF("Write(fragment_size=%u)", fragment_size);
 
-	if (atomic_get(&total_size) == 0) {
+	if (total_size == 0) {
 		/* Write received without init first */
 		return -EACCES;
 	}
-	if (atomic_cas(&initialized, 0, 1)) {
+	if (!initialized) {
 		/* First fragment, initialize. */
 		int img_type;
 
@@ -101,6 +101,8 @@ static int srv_write_handle(const uint8_t *const fragment_buf,
 		if (err < 0) {
 			return err;
 		}
+
+		initialized = true;
 	}
 	return dfu_target_write(fragment_buf, fragment_size);
 }
@@ -123,10 +125,10 @@ static void srv_evt_handle(const struct uart_dfu_srv_evt *const evt)
 		k_poll_signal_reset(&sig_stop);
 		break;
 	case UART_DFU_SRV_EVT_STOPPED:
-		if (atomic_get(&initialized)) {
+		if (initialized) {
 			(void) dfu_target_reset();
 			state_reset();
-		} else if (atomic_get(&total_size)) {
+		} else if (total_size != 0) {
 			state_reset();
 		}
 		k_poll_signal_raise(&sig_stop, evt->err);
