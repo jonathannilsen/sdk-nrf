@@ -183,14 +183,15 @@ static void cli_recv_offset_handle(const struct uart_dfu_pdu *pdu)
 	}
 }
 
-static void cli_recv_handle(const struct uart_dfu_pdu *const pdu,
-			    const size_t len)
+static void cli_recv_handle(const uint8_t *buf, size_t len)
 {
 	if (len == 0) {
 		return;
 	}
 
+	const struct uart_dfu_pdu *pdu = (const struct uart_dfu_pdu *) buf;
 	int opcode = (int) pdu->hdr.opcode;
+
 	if (len != PDU_SIZE(sizeof(struct uart_dfu_status_args))	||
 	    !pdu->hdr.status 						||
 	    rx_opcode != opcode) {
@@ -313,7 +314,7 @@ void uart_dfu_cli_evt_handle(const struct uart_dfu_evt *const evt)
 {
 	switch (evt->type) {
 	case UART_DFU_EVT_RX:
-		cli_recv_handle(evt->data.rx.pdu, evt->data.rx.len);
+		cli_recv_handle(evt->data.rx.buf, evt->data.rx.len);
 		break;
 	case UART_DFU_EVT_RX_END:
 		cli_recv_abort_handle(evt->data.err);

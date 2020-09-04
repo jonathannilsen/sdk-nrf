@@ -108,48 +108,6 @@ struct uart_dfu_pdu {
 	union uart_dfu_args args;
 } __packed;
 
-/** UART DFU event types. */
-enum uart_dfu_evt_type {
-	/** Session entered. */
-	UART_DFU_EVT_SESS_ENTER,
-	/** Session exited due to a user-specified error. */
-	UART_DFU_EVT_SESS_EXIT,
-	/** Received data. */
-	UART_DFU_EVT_RX,
-	/** Reception aborted by user or due to timeout or UART break. */
-	UART_DFU_EVT_RX_END,
-	/** Transmission completed or aborted by user or due to timeout. */
-	UART_DFU_EVT_TX_END,
-};
-
-/** UART DFU event structure. */
-struct uart_dfu_evt {
-	enum uart_dfu_evt_type type;
-	union {
-		/** Event structure used by UART_DFU_EVT_RX. */
-		struct {
-			struct uart_dfu_pdu *pdu;
-			size_t len;
-		} rx;
-		/**
-		 * Error value used by UART_DFU_EVT_SESS_EXIT,
-		 * UART_DFU_EVT_RX_END, and UART_DFU_EVT_TX_END.
-		 */
-		int err;
-	} data;
-};
-
-/** UART DFU event callback signature. */
-typedef void (*uart_dfu_cb_t)(const struct uart_dfu_evt *const evt);
-
-/** UART DFU session names. */
-enum uart_dfu_sess {
-	UART_DFU_SESS_IDLE,
-	UART_DFU_SESS_SRV,
-	UART_DFU_SESS_CLI,
-	UART_DFU_SESS_SW,
-	UART_DFU_SESS_COUNT
-};
 
 /** @} */
 
