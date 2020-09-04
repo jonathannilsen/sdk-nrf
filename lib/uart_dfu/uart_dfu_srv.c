@@ -252,7 +252,7 @@ static int srv_recv_offset_handle(const struct uart_dfu_pdu *pdu,
 /**
  * @brief Handle reception of UART_DFU_OPCODE_DONE
  */
-static int srv_recv_done_handle(struct uart_dfu_pdu *pdu,
+static int srv_recv_done_handle(const struct uart_dfu_pdu *pdu,
 				size_t len,
 				struct uart_dfu_pdu *rsp)
 {
@@ -271,16 +271,17 @@ static int srv_recv_done_handle(struct uart_dfu_pdu *pdu,
 	}
 }
 
-static void srv_recv_handle(struct uart_dfu_pdu *pdu, size_t len)
+static void srv_recv_handle(const uint8_t *buf, size_t len)
 {
-	int err;
-	struct uart_dfu_pdu rsp;
-
-	if (pdu->hdr.status || len == 0) {
+	const struct uart_dfu_pdu *pdu = (const struct uart_dfu_pdu *) buf;
+	if (len == 0 || pdu->hdr.status) {
 		return;
 	}
 
+	int err;
+	struct uart_dfu_pdu rsp;
 	memset(&rsp, 0, sizeof(rsp));
+	
 	switch (pdu->hdr.opcode) {
 	case UART_DFU_OPCODE_INIT:
 		LOG_DBG("srv: received INIT");
@@ -375,7 +376,7 @@ void uart_dfu_srv_evt_handle(const struct uart_dfu_evt *const evt)
 {
 	switch (evt->type) {
 	case UART_DFU_EVT_RX:
-		srv_recv_handle(evt->data.rx.pdu, evt->data.rx.len);
+		srv_recv_handle(evt->data.rx.buf, evt->data.rx.len);
 		break;
 	case UART_DFU_EVT_RX_END:
 		srv_recv_abort_handle(evt->data.err);
@@ -402,7 +403,7 @@ void uart_dfu_srv_idle_evt_handle(const struct uart_dfu_evt *const evt)
 {
 	switch (evt->type) {
 	case UART_DFU_EVT_RX:
-		srv_recv_handle(evt->data.rx.pdu, evt->data.rx.len);
+		srv_recv_handle(evt->data.rx.buf, evt->data.rx.len);
 		break;
 	case UART_DFU_EVT_RX_END:
 		if (evt->data.err != -EFAULT) {
