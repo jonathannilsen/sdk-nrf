@@ -1,0 +1,65 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "UART BLOB transfer"
+
+# Default config values 
+
+config UART_BLOB_DEFAULT_SEND_TIMEOUT
+	int # Default send timeout (ms)
+	default 1000
+
+config UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+	int # Default response timeout (ms)
+	default 10000
+
+
+# UART BLOB sender configuration
+
+config UART_BLOB_TX
+	bool "UART BLOB sender"
+	default n
+
+if UART_BLOB_TX
+
+config UART_BLOB_TX_SEND_TIMEOUT
+	int "UART BLOB sender send timeout (ms)"
+	default UART_BLOB_DEFAULT_SEND_TIMEOUT
+
+config UART_BLOB_TX_RESPONSE_TIMEOUT
+	int "UART BLOB sender response timeout (ms)"
+	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+
+module=UART_BLOB_TX
+module-str=UART BLOB sender
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+endif # UART_BLOB_TX
+
+
+# UART BLOB receiver configuration
+
+config UART_BLOB_RX
+	bool "UART BLOB receiver"
+	default n
+
+if UART_BLOB_RX
+
+config UART_BLOB_RX_SEND_TIMEOUT
+	int "UART BLOB receiver send timeout (ms)"
+	default UART_DFU_DEFAULT_SEND_TIMEOUT
+
+config UART_BLOB_RX_RESPONSE_TIMEOUT
+	int "UART BLOB receiver response timeout (ms)"
+	default UART_DFU_DEFAULT_RESPONSE_TIMEOUT
+
+module=UART_BLOB_RX
+module-str=UART BLOB receiver
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+endif # UART_BLOB_RX
+
+endmenu

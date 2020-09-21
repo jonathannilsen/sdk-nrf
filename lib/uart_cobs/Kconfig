@@ -1,0 +1,26 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "UART COBS library"
+
+# UART COBS module configuration
+
+config UART_COBS
+	bool "UART COBS library"
+	depends on SERIAL
+	depends on UART_ASYNC_API
+
+config UART_COBS_THREAD_PRIO
+	int "UART COBS library workqueue thread priority level"
+	range 0 NUM_PREEMPT_PRIORITIES
+	default 0 if !MULTITHREADING
+	default 10
+
+config UART_COBS_THREAD_STACK_SIZE
+	int "UART COBS library workqueue thread stack size"
+	default 1024
+
+endmenu

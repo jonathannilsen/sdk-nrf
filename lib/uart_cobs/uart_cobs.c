@@ -10,58 +10,34 @@
 #include <logging/log.h>
 #include <drivers/uart.h>
 
-#include <uart_dfu.h>
-#include <uart_dfu_types.h>
-#include <uart_dfu_srv.h>
-#include <uart_dfu_cli.h>
+#include <uart_cobs.h>
 #include <cobs.h>
 
-/* TODO:
-	- Put checks in static inline
-	- Rename api
-	- Decouple callback api
-*/
 
 /*****************************************************************************
 * Macros
 *****************************************************************************/
 
-#define EVT_SEND	 ((uart_dfu_cb_t) atomic_ptr_get(&state.user.current))
+#define EVT_SEND	 ((uart_cobs_cb_t) atomic_ptr_get(&state.user.current))
 
-#define LOG_DBG_DEV(...) LOG_DBG(DT_LABEL(UART_DFU_DT) ": " __VA_ARGS__)
-
-#define UART_DFU_DT	 DT_CHOSEN(nordic_dfu_uart_controller)
-#define MIN_TIMEOUT	 ceiling_fraction(COBS_MAX_BYTES * 8 * MSEC_PER_SEC, \
-					  DT_PROP(UART_DFU_DT, current_speed))
-#define TIMEOUT_VALIDATE(_timeout) \
-	BUILD_ASSERT(MIN_TIMEOUT < _timeout, \
-		     #_timeout " is too low for " DT_LABEL(UART_DFU_DT))
+#define LOG_DBG_DEV(...) LOG_DBG(DT_LABEL(UART_COBS_DT) ": " __VA_ARGS__)
 
 /* Compile-time validation of chosen UART controller. */
-BUILD_ASSERT(DT_NODE_EXISTS(UART_DFU_DT),
-	     "Missing /chosen devicetree node: nordic,dfu-uart-controller");
-BUILD_ASSERT(DT_NODE_HAS_STATUS(UART_DFU_DT, okay),
-	     DT_LABEL(UART_DFU_DT) " not enabled");
-BUILD_ASSERT(DT_PROP(UART_DFU_DT, hw_flow_control),
-	     "Hardware flow control not enabled for " DT_LABEL(UART_DFU_DT));
+BUILD_ASSERT(DT_NODE_EXISTS(UART_COBS_DT),
+	     "Missing /chosen devicetree node: nordic,cobs-uart-controller");
+BUILD_ASSERT(DT_NODE_HAS_STATUS(UART_COBS_DT, okay),
+	     DT_LABEL(UART_COBS_DT) " not enabled");
+BUILD_ASSERT(DT_PROP(UART_COBS_DT, hw_flow_control),
+	     "Hardware flow control not enabled for " DT_LABEL(UART_COBS_DT));
 
-#if CONFIG_UART_DFU_CLI
-TIMEOUT_VALIDATE(CONFIG_UART_DFU_CLI_RESPONSE_TIMEOUT);
-TIMEOUT_VALIDATE(CONFIG_UART_DFU_CLI_SEND_TIMEOUT);
-#endif
-#if CONFIG_UART_DFU_SRV
-TIMEOUT_VALIDATE(CONFIG_UART_DFU_SRV_RESPONSE_TIMEOUT);
-TIMEOUT_VALIDATE(CONFIG_UART_DFU_SRV_SEND_TIMEOUT);
-#endif
-
-LOG_MODULE_REGISTER(uart_dfu, CONFIG_UART_DFU_LIBRARY_LOG_LEVEL);
+LOG_MODULE_REGISTER(uart_cobs, CONFIG_UART_COBS_LOG_LEVEL);
 
 
 /*****************************************************************************
 * Forward declarations
 *****************************************************************************/
 
-static void sw_evt_handle(const struct uart_dfu_evt *const evt);
+static void sw_evt_handle(const struct uart_cobs_evt *const evt);
 
 
 /*****************************************************************************
@@ -69,21 +45,18 @@ static void sw_evt_handle(const struct uart_dfu_evt *const evt);
 *****************************************************************************/
 
 enum op_status {
-	STATUS_OFF,
-	STATUS_ON,
-	STATUS_ERR
+	STATUS_OFF	= 0,
+	STATUS_ON	= 1
 };
 
 struct {
 	struct device *dev;
 	struct {
 		atomic_t status;
-		int err;
 		struct cobs_enc_buf buf;
 	} tx;
 	struct {
 		atomic_t status;
-		int err;
 		bool processing;
 		struct k_timer timer;
 		struct cobs_dec decoder;
@@ -97,10 +70,10 @@ struct {
 	} rx;
 	struct {
 		atomic_ptr_t current;
-		uart_dfu_cb_t idle;
+		uart_cobs_cb_t idle;
 		struct {
-			uart_dfu_cb_t from;
-			uart_dfu_cb_t to;
+			uart_cobs_cb_t from;
+			uart_cobs_cb_t to;
 			int err;
 		} pending;
 	} user;
@@ -112,55 +85,48 @@ struct {
 } state;
 
 K_THREAD_STACK_DEFINE(work_q_stack_area,
-		      CONFIG_UART_DFU_LIBRARY_THREAD_STACK_SIZE);
+		      CONFIG_UART_COBS_THREAD_STACK_SIZE);
 
 
 /*****************************************************************************
 * Static functions
 *****************************************************************************/
 
-bool status_error_set(atomic_t *status, int *status_err, int err)
+bool status_error_set(atomic_t *status, int err)
 {
-	if (atomic_cas(status, STATUS_ON, STATUS_ERR)) {
-		*status_err = err;
-		return true;
-	} else {
-		return false;
-	}
+	return atomic_cas(status, STATUS_ON, err));
 }
 
 static inline bool rx_error_set(int err)
 {
-	return status_error_set(&state.rx.status, &state.rx.err, err);
+	return status_error_set(&state.rx.status, err);
 }
 
 static inline bool tx_error_set(int err)
 {
-	return status_error_set(&state.tx.status, &state.tx.err, err);
+	return status_error_set(&state.tx.status, err);
 }
 
-static void send_evt_end(enum uart_dfu_evt_type type, int err)
+static void send_evt_end(enum uart_cobs_evt_type type, int err)
 {
-	struct uart_dfu_evt evt;
-
+	struct uart_cobs_evt evt;
 	evt.type = type;
 	evt.data.err = err;
 	EVT_SEND(&evt);
 }
 
-static void sess_enter(void)
+static void user_start(void)
 {
-	struct uart_dfu_evt evt;
-
-	evt.type = UART_DFU_EVT_SESS_ENTER;
+	struct uart_cobs_evt evt;
+	evt.type = UART_COBS_EVT_USER_START;
 	EVT_SEND(&evt);
 }
 
-static void sess_exit(uart_dfu_cb_t from, int err)
+static void user_end(uart_cobs_cb_t from, int err)
 {
 	if (from != NULL) {
-		struct uart_dfu_evt evt;
-		evt.type = UART_DFU_EVT_SESS_EXIT;
+		struct uart_cobs_evt evt;
+		evt.type = UART_COBS_EVT_USER_END;
 		evt.data.err = err;
 		from(&evt);
 	}
@@ -172,31 +138,31 @@ static bool user_sw_ready(void)
 
 	/* Check current RX status. */
 	switch (atomic_get(&state.rx.status)) {
-	case STATUS_ON:
-		(void) uart_dfu_rx_stop();
-		ready = false;
-		break;
-	case STATUS_ERR:
-		ready = false;
-		break;
 	case STATUS_OFF:
-	default:
 		state.rx.processing = false; // TODO: necessary?
-		uart_dfu_rx_timeout_stop();
+		uart_cobs_rx_timeout_stop();
+		break;
+	case STATUS_ON:
+		(void) uart_cobs_rx_stop();
+		ready = false;
+		break;
+	default:
+		/* Error state. */
+		ready = false;
 		break;
 	}
 
 	/* Check current TX status. */
 	switch (atomic_get(&state.tx.status)) {
-	case STATUS_ON:
-		(void) uart_dfu_tx_stop();
-		ready = false;
-		break;
-	case STATUS_ERR:
-		ready = false;
-		break;
 	case STATUS_OFF:
+		break;
+	case STATUS_ON:
+		(void) uart_cobs_tx_stop();
+		ready = false;
+		break;
 	default:
+		/* Error state. */
+		ready = false;
 		break;
 	}
 
@@ -206,17 +172,17 @@ static bool user_sw_ready(void)
 static void user_sw_finish(void)
 {
 	LOG_DBG_DEV("Exiting from session %d", state.user.pending.from);
-	sess_exit(state.user.pending.from, state.user.pending.err);
+	user_end(state.user.pending.from, state.user.pending.err);
 
 	LOG_DBG_DEV("Entering session %d", state.user.pending.to);
 	__ASSERT(atomic_get(&state.rx.status) == STATUS_OFF &&
 		 atomic_get(&state.tx.status) == STATUS_OFF,
 		 "Expected RX and TX to be off before entering session");
 	(void) atomic_ptr_set(&state.user.current, state.user.pending.to);
-	sess_enter();
+	user_start();
 }
 
-static int user_sw_prepare(uart_dfu_cb_t from, uart_dfu_cb_t to, int err)
+static int user_sw_prepare(uart_cobs_cb_t from, uart_cobs_cb_t to, int err)
 {
 	/* Switch between sessions by passing through a temporary "SW" session
 	 * where RX/TX can be stopped and residual events can be safely caught
@@ -244,7 +210,14 @@ static int user_sw_prepare(uart_dfu_cb_t from, uart_dfu_cb_t to, int err)
 	}
 }
 
-static void sw_evt_handle(const struct uart_dfu_evt *const evt)
+static void no_evt_handle(const struct uart_cobs_evt *const evt)
+{
+	ARG_UNUSED(evt);
+
+	/* Do nothing. */
+}
+
+static void sw_evt_handle(const struct uart_cobs_evt *const evt)
 {
 	ARG_UNUSED(evt);
 
@@ -286,9 +259,9 @@ static void rx_process(void)
 {
 	int ret = 0;
 	const uint8_t *buf = &state.rx.raw.buf[state.rx.raw.offset];
-	struct uart_dfu_evt evt;
+	struct uart_cobs_evt evt;
 
-	evt.type = UART_DFU_EVT_RX;
+	evt.type = UART_COBS_EVT_RX;
 	evt.data.rx.buf = state.rx.decoded_buf;
 
 	for (size_t i = 0; i < state.rx.raw.len; i++) {
@@ -308,7 +281,7 @@ static void rx_process(void)
 			ret = -ECANCELED;
 			break;
 		} else if (atomic_get(&state.rx.status) == STATUS_ON) {
-			/* uart_dfu_rx_start() was called in event handler. */
+			/* uart_cobs_rx_start() was called in event handler. */
 			ret = -EAGAIN;
 		}
 	}
@@ -335,31 +308,22 @@ static void rx_dis_process(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	enum op_status status;
-	status = (enum op_status) atomic_set(&state.rx.status, STATUS_OFF);
+	atomic_val_t status = atomic_set(&state.rx.status, STATUS_OFF);
 
-	switch (status) {
-	case STATUS_ON:
+	if (status > 0) {
 		if (state.rx.processing) {
 			rx_process();
 		}
-		break;
-	case STATUS_ERR:
-		if (state.rx.err == -EAGAIN) {
-			/* Malformed data. Reset and resume reception. */
-			state.rx.processing = false;
-			cobs_dec_reset(&state.rx.decoder);
-			rx_resume();
-		} else {
-			/* Fatal error. */
-			LOG_DBG_DEV("RX stopped with error: %d", state.rx.err);
-			state.rx.processing = false;  // TODO: necessary?
-			send_evt_end(UART_DFU_EVT_RX_END, state.rx.err);
-		}
-		break;
-	case STATUS_OFF:
-	default:
-		break;
+	} else if (status == -EAGAIN) {
+		/* Malformed data. Reset and resume reception. */
+		state.rx.processing = false;
+		cobs_dec_reset(&state.rx.decoder);
+		rx_resume();
+	} else {
+		/* Fatal error. */
+		LOG_DBG_DEV("RX stopped with error: %d", status);
+		state.rx.processing = false;  // TODO: necessary?
+		send_evt_end(UART_COBS_EVT_RX_END, status);
 	}
 }
 
@@ -367,15 +331,14 @@ static void tx_dis_process(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	enum op_status status;
-	status = (enum op_status) atomic_set(&state.tx.status, STATUS_OFF);
+	atomic_val_t status = atomic_set(&state.tx.status, STATUS_OFF);
 
-	if (status == STATUS_ERR) {
-		LOG_DBG_DEV("TX stopped with error %d", state.tx.err);
-		send_evt_end(UART_DFU_EVT_TX_END, state.tx.err);
+	if (status < 0) {
+		LOG_DBG_DEV("TX stopped with error %d", status);
+		send_evt_end(UART_COBS_EVT_TX_END, status);
 	} else {
 		LOG_DBG_DEV("TX complete event");
-		send_evt_end(UART_DFU_EVT_TX_END, 0);
+		send_evt_end(UART_COBS_EVT_TX_END, 0);
 	}
 }
 
@@ -429,12 +392,10 @@ static void uart_rx_stopped_handle(struct uart_event_rx_stop *evt)
 	case UART_ERROR_OVERRUN:
 	case UART_ERROR_PARITY:
 	case UART_ERROR_FRAMING:
-		(void) rx_error_set(-EAGAIN); // FIXME: proper error?	
+		(void) rx_error_set(-EAGAIN);
 		break;
 	case UART_BREAK:
 	default:
-		/* FIXME: check that we can't end in an invalid state if
-			other errors are always received before this one. */
 		(void) rx_error_set(-ENETDOWN);
 		break;
 	}
@@ -481,12 +442,12 @@ static void uart_async_cb(struct uart_event *evt, void *user_data)
 * API functions
 *****************************************************************************/
 
-static int uart_dfu_sys_init(struct device *dev)
+static int uart_cobs_sys_init(struct device *dev)
 {
 	ARG_UNUSED(dev);
 
 	/* Driver init. */
-	state.dev = device_get_binding(DT_LABEL(UART_DFU_DT));
+	state.dev = device_get_binding(DT_LABEL(UART_COBS_DT));
 	if (state.dev == NULL) {
 		return -EACCES;
 	}
@@ -498,29 +459,37 @@ static int uart_dfu_sys_init(struct device *dev)
 	}
 
 	/* Module init. */
+	(void) atomic_set(&state.rx.status, STATUS_OFF);
+	(void) atomic_set(&state.tx.status, STATUS_OFF);
+
 	k_timer_init(&state.rx.timer, rx_timer_expired, NULL);
 	k_timer_user_data_set(&state.rx.timer, NULL);
 
 	cobs_dec_init(&state.rx.decoder, state.rx.decoded_buf);
+
+	state.user.idle = no_evt_handle;
+	(void) atomic_set(&state.user.current, state.user.idle);
 
 	k_work_init(&state.work.rx_dis, rx_dis_process);
 	k_work_init(&state.work.tx_dis, tx_dis_process);
 
 	k_work_q_start(&state.work.q, work_q_stack_area,
 		       K_THREAD_STACK_SIZEOF(work_q_stack_area),
-		       CONFIG_UART_DFU_LIBRARY_THREAD_PRIO);
-
-	/* Enter idle session. */
-	sess_enter();
+		       CONFIG_UART_COBS_THREAD_PRIO);
 	return 0;
 }
 
-uint8_t *uart_dfu_tx_buf_get(void)
+int uart_cobs_init(void)
+{
+	return uart_cobs_sys_init(NULL);
+}
+
+uint8_t *uart_cobs_tx_buf_get(void)
 {
 	return state.tx.buf.buf;
 }
 
-int uart_dfu_tx_start(size_t len, int timeout)
+int uart_cobs_tx_start(size_t len, int timeout)
 {
 	int err;
 
@@ -545,8 +514,7 @@ int uart_dfu_tx_start(size_t len, int timeout)
 	return 0;
 }
 
-/* TODO maybe remove */
-int uart_dfu_tx_stop(void)
+int uart_cobs_tx_stop(void)
 {
 	if (tx_error_set(-ECONNABORTED)) {
 		return uart_tx_abort(state.dev);
@@ -554,7 +522,7 @@ int uart_dfu_tx_stop(void)
 	return 0;
 }
 
-int uart_dfu_rx_start(size_t len)
+int uart_cobs_rx_start(size_t len)
 {
 	if (!atomic_cas(&state.rx.status, STATUS_OFF, STATUS_ON)) {
 		LOG_DBG_DEV("RX was already started");
@@ -567,7 +535,7 @@ int uart_dfu_rx_start(size_t len)
 		if (err) {
 			return err;
 		}
-	} else if (uart_dfu_in_work_q_thread()) {
+	} else if (uart_cobs_in_work_q_thread()) {
 		/* RX will start after buffer processing finishes. */
 	} else {
 		LOG_DBG_DEV("RX failed to start (processing)");
@@ -579,7 +547,7 @@ int uart_dfu_rx_start(size_t len)
 	return 0;
 }
 
-int uart_dfu_rx_stop(void)
+int uart_cobs_rx_stop(void)
 {
 	if (rx_error_set(-ECONNABORTED)) {
 		return uart_rx_disable(state.dev);
@@ -587,36 +555,61 @@ int uart_dfu_rx_stop(void)
 	return 0;
 }
 
-void uart_dfu_rx_timeout_start(int timeout)
+void uart_cobs_rx_timeout_start(int timeout)
 {
-	LOG_DBG_DEV("Starting timeout: %d ms", timeout);
+	/* FIXME: check that RX is on? */
 	k_timer_start(&state.rx.timer, K_MSEC(timeout), K_NO_WAIT);
 }
 
-void uart_dfu_rx_timeout_stop(void)
+void uart_cobs_rx_timeout_stop(void)
 {
 	k_timer_stop(&state.rx.timer);
 }
 
-int uart_dfu_user_request(uart_dfu_cb_t user_cb)
+int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb)
+{
+	if (idle_cb == NULL) {
+		/* Switch to the unset idle state if NULL is passed */
+		idle_cb = no_evt_handle;
+	}
+
+	/* Switch to empty idle handler first to lock the user state,
+	   preventing other switches from messing up the state. */
+	if (!atomic_cas(&state.user.current, state.user.idle, no_evt_handle)) {
+		return -EBUSY;
+	}
+	
+	uart_cobs_cb_t prev_cb = state.user.idle;
+	state.user.idle = idle_cb;
+	if (prev_cb == idle_cb) {
+		return -EALREADY;
+	}
+
+	(void) user_sw_prepare(prev_cb, idle_cb);
+	return 0;
+}
+
+int uart_cobs_user_start(uart_cobs_cb_t user_cb)
 {
 	if (user_cb == NULL) {
 		return -EINVAL;
 	}
-
 	if (atomic_ptr_get(&state.user.current) == user_cb) {
 		return -EALREADY;
 	} else {
-		return user_sw_prepare(idle_cb, user_cb, 0);
+		return user_sw_prepare(state.user.idle, user_cb, 0);
 	}
 }
 
-int uart_dfu_user_release(uart_dfu_cb_t user_cb, int err)
+int uart_cobs_user_end(uart_cobs_cb_t user_cb, int err)
 {
-	return user_sw_prepare(user_cb, idle_cb, err);
+	if (user_cb == NULL) {
+		return -EINVAL;
+	}
+	return user_sw_prepare(user_cb, state.user.idle, err);
 }
 
-bool uart_dfu_in_work_q_thread(void)
+bool uart_cobs_in_work_q_thread(void)
 {
 	return k_current_get() == &state.work.q.thread;
 }
@@ -625,4 +618,4 @@ bool uart_dfu_in_work_q_thread(void)
 * System initialization hooks
 *****************************************************************************/
 
-SYS_INIT(uart_dfu_sys_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(uart_cobs_sys_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

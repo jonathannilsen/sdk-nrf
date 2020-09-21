@@ -1,6 +1,6 @@
 / {
 	chosen {
-		nordic,dfu-uart-controller=&uart1;
+		nordic,cobs-uart-controller=&uart1;
 	};
 };
 
