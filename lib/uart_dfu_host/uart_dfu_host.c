@@ -18,7 +18,7 @@
 *****************************************************************************/
 
 static bool initialized			= false;
-static size_t total_size		= 0;
+static size_t total_len			= 0;
 static uint8_t fragment[CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE];
 
 static struct k_poll_signal sig_stop	= K_POLL_SIGNAL_INITIALIZER(sig_stop);
@@ -32,7 +32,7 @@ LOG_MODULE_REGISTER(uart_dfu_host, CONFIG_UART_DFU_HOST_LOG_LEVEL);
 
 static void state_reset(void)
 {
-	total_size = 0;
+	total_len = 0;
 	initialized = false;
 }
 
@@ -49,13 +49,13 @@ static void target_evt_handle(enum dfu_target_evt_id evt_id)
 	}
 }
 
-static int srv_init_handle(size_t file_size)
+static int blob_init_handle(size_t blob_len)
 {
-	if (file_size == 0) {
+	if (blob_len == 0) {
 		return -EINVAL;
 	}
-	if (total_size == 0) {
-		total_size = file_size;
+	if (total_len == 0) {
+		total_len = file_size;
 		LOG_INF("Initialized(file_size=%u)", file_size);
 		return 0;
 	} else {
@@ -64,7 +64,7 @@ static int srv_init_handle(size_t file_size)
 	}
 }
 
-static int srv_offset_handle(size_t *offset)
+static int blob_offset_handle(size_t *offset)
 {
 	LOG_INF("Offset()");
 
@@ -78,12 +78,12 @@ static int srv_offset_handle(size_t *offset)
 	return dfu_target_offset_get(offset);
 }
 
-static int srv_write_handle(const uint8_t *const fragment_buf,
+static int blob_write_handle(const uint8_t *const fragment_buf,
 			    size_t fragment_size)
 {
 	LOG_INF("Write(fragment_size=%u)", fragment_size);
 
-	if (total_size == 0) {
+	if (total_len == 0) {
 		/* Write received without init first */
 		return -EACCES;
 	}
@@ -96,7 +96,7 @@ static int srv_write_handle(const uint8_t *const fragment_buf,
 			return img_type;
 		}
 
-		int err = dfu_target_init(img_type, total_size,
+		int err = dfu_target_init(img_type, total_len,
 					target_evt_handle);
 		if (err < 0) {
 			return err;
@@ -107,7 +107,7 @@ static int srv_write_handle(const uint8_t *const fragment_buf,
 	return dfu_target_write(fragment_buf, fragment_size);
 }
 
-static int srv_done_handle(bool successful)
+static int blob_done_handle(bool successful)
 {
 	LOG_INF("Done(successful=%u)", successful);
 
@@ -118,7 +118,7 @@ static int srv_done_handle(bool successful)
 	return err;
 }
 
-static void srv_evt_handle(const struct uart_dfu_srv_evt *const evt)
+static void blob_evt_handle(const struct uart_dfu_srv_evt *const evt)
 {
 	switch (evt->type) {
 	case UART_DFU_SRV_EVT_STARTED:
@@ -128,7 +128,7 @@ static void srv_evt_handle(const struct uart_dfu_srv_evt *const evt)
 		if (initialized) {
 			(void) dfu_target_reset();
 			state_reset();
-		} else if (total_size != 0) {
+		} else if (total_len != 0) {
 			state_reset();
 		}
 		k_poll_signal_raise(&sig_stop, evt->err);
@@ -138,7 +138,7 @@ static void srv_evt_handle(const struct uart_dfu_srv_evt *const evt)
 	}
 }
 
-static void srv_stop_wait(void)
+static void blob_rx_stop_wait(void)
 {
 	struct k_poll_event evt = K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SIGNAL,
 							K_POLL_MODE_NOTIFY_ONLY,
@@ -157,11 +157,11 @@ void uart_dfu_host_init(void)
 
 	state_reset();
 
-	callbacks.init_cb	= srv_init_handle;
-	callbacks.write_cb	= srv_write_handle;
-	callbacks.offset_cb	= srv_offset_handle;
-	callbacks.done_cb	= srv_done_handle;
-	callbacks.evt_cb	= srv_evt_handle;
+	callbacks.init_cb	= blob_init_handle;
+	callbacks.write_cb	= blob_write_handle;
+	callbacks.offset_cb	= blob_offset_handle;
+	callbacks.done_cb	= blob_done_handle;
+	callbacks.evt_cb	= blob_evt_handle;
 
 	(void) uart_dfu_srv_init(fragment,
 				CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE,
@@ -178,6 +178,6 @@ void uart_dfu_host_disable(void)
 	int err = uart_dfu_srv_disable();
 	if (err == -EINPROGRESS) {
 		/* Wait for stop */
-		srv_stop_wait();
+		blob_rx_stop_wait();
 	}
 }

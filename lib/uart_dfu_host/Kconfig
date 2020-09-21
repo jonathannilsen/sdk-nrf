@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "UART DFU host"
+
+# UART DFU host configuration
+
+config UART_DFU_HOST
+	bool "UART DFU host"
+	depends on UART_BLOB_RX
+	depends on DFU_TARGET
+	depends on POLL
+
+config UART_DFU_HOST_MAX_FRAGMENT_SIZE
+	int "UART DFU host maximum fragment size."
+	default 2048
+
+module=UART_DFU_HOST
+module-str=UART DFU host
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+endmenu

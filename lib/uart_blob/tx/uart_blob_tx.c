@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
 
-#include <uart_dfu_cli.h>
-#include <uart_dfu_util.h>
+#include <uart_blob_tx.h>
+#include <uart_blob_util.h>
 
 #include <zephyr.h>
 #include <logging/log.h>
@@ -25,6 +25,13 @@ struct fragment_in {
 
 
 /*****************************************************************************
+* Forward declarations 
+*****************************************************************************/
+
+static void cobs_user_cb(const struct uart_cobs_evt *const evt);
+
+
+/*****************************************************************************
 * Static variables
 *****************************************************************************/
 
@@ -32,9 +39,9 @@ static atomic_t api_avail		= ATOMIC_INIT(0);
 static bool in_write			= false;
 static int rx_opcode			= OPCODE_NONE;
 static struct fragment_in fragment 	= {0};
-static struct uart_dfu_cli_cb app_cb 	= {NULL};
+static struct uart_blob_tx_cb app_cb 	= {NULL};
 
-LOG_MODULE_DECLARE(uart_dfu, CONFIG_UART_DFU_LIBRARY_LOG_LEVEL);
+LOG_MODULE_REGISTER(uart_blob_tx, CONFIG_UART_BLOB_TX_LOG_LEVEL);
 
 
 /*****************************************************************************
@@ -82,55 +89,55 @@ static void state_reset(void)
 	fragment_init(NULL, 0);
 }
 
-static enum uart_dfu_cli_err err_type_get(int err)
+static enum uart_blob_tx_err err_type_get(int err)
 {
 	switch (err) {
-	case UART_DFU_CLI_SUCCESS:
-	case UART_DFU_CLI_ERR_TIMEOUT:
-	case UART_DFU_CLI_ERR_BREAK:
-		return (enum uart_dfu_cli_err) err;
+	case UART_BLOB_TX_SUCCESS:
+	case UART_BLOB_TX_ERR_TIMEOUT:
+	case UART_BLOB_TX_ERR_BREAK:
+		return (enum uart_blob_tx_err) err;
 	default:
-		return UART_DFU_CLI_ERR_FATAL;
+		return UART_BLOB_TX_ERR_FATAL;
 	}
 }
 
-static void evt_send(enum uart_dfu_cli_evt_type type, enum uart_dfu_cli_err err)
+static void evt_send(enum uart_blob_tx_evt_type type, enum uart_blob_tx_err err)
 {
-	struct uart_dfu_cli_evt evt = {
+	struct uart_blob_tx_evt evt = {
 		.type = type,
 		.err = err
 	};
 	app_cb.evt_cb(&evt);
 }
 
-static int cli_send(const struct uart_dfu_pdu *pdu, size_t len)
+static int pdu_send(const struct uart_blob_pdu *pdu, size_t len)
 {
-	uint8_t *buf = uart_dfu_tx_buf_get();
+	uint8_t *buf = uart_cobs_tx_buf_get();
 	memcpy(buf, pdu, len);
-	return uart_dfu_tx_start(len, CONFIG_UART_DFU_CLI_SEND_TIMEOUT);
+	return uart_cobs_tx_start(len, CONFIG_UART_BLOB_TX_SEND_TIMEOUT);
 }
 
-static bool cli_writec_send(void)
+static bool writec_send(void)
 {
-	struct uart_dfu_hdr hdr;
+	struct uart_blob_hdr hdr;
 	memset(&hdr, 0, sizeof(hdr));
-	hdr.opcode = UART_DFU_OPCODE_WRITEC;
+	hdr.opcode = UART_BLOB_OPCODE_WRITEC;
 
-	size_t seg_size = fragment_seg_len();
-	const uint8_t *seg_data = fragment_read(seg_size); /* FIXME: NULL?*/
+	size_t seg_len = fragment_seg_len();
+	const uint8_t *seg_data = fragment_read(seg_len); /* FIXME: NULL?*/
 
-	uint8_t *buf = uart_dfu_tx_buf_get();
+	uint8_t *buf = uart_cobs_tx_buf_get();
 	memcpy(&buf[0], &hdr, sizeof(hdr));
-	memcpy(&buf[sizeof(hdr)], seg_data, seg_size);
+	memcpy(&buf[sizeof(hdr)], seg_data, seg_len);
 
-	int err = uart_dfu_tx_start(sizeof(hdr) + seg_size,
-				CONFIG_UART_DFU_CLI_SEND_TIMEOUT);
+	int err = uart_cobs_tx_start(sizeof(hdr) + seg_len,
+				CONFIG_UART_BLOB_TX_SEND_TIMEOUT);
 	__ASSERT(err == 0, "Unexpected UART error: %d.", err);
 
 	return fragment_done();
 }
 
-static bool cli_write_seq_cont(void)
+static bool write_seq_cont(void)
 {
 	if (fragment_done()) {
 		fragment_init(NULL, 0);
@@ -138,12 +145,12 @@ static bool cli_write_seq_cont(void)
 	}
 
 	/* Continue transmitting the fragment */
-	bool final = cli_writec_send();
+	bool final = writec_send();
 	if (final) {
 		/* Final segment - prepare to receive reply. */
-		rx_opcode = UART_DFU_OPCODE_WRITEC;
-		int err = uart_dfu_rx_start(
-			PDU_SIZE(sizeof(struct uart_dfu_status_args)));
+		rx_opcode = UART_BLOB_OPCODE_WRITEC;
+		int err = uart_cobs_rx_start(
+			PDU_SIZE(sizeof(struct uart_blob_status_args)));
 		__ASSERT(err == 0, "Unexpected UART error: %d.", err);
 	}
 	return true;
@@ -154,26 +161,26 @@ static bool cli_write_seq_cont(void)
  * Event handler functions
  *****************************************************************************/
 
-static void cli_recv_status_handle(const struct uart_dfu_pdu *pdu)
+static void status_recv_handle(const struct uart_blob_pdu *pdu)
 {
 	(void) atomic_set(&api_avail, 1);
 	app_cb.status_cb(pdu->args.status.data.status);
 }
 
-static void cli_recv_writeh_handle(const struct uart_dfu_pdu *pdu)
+static void writeh_recv_handle(const struct uart_blob_pdu *pdu)
 {
 	int status = pdu->args.status.data.status;
 
 	if (status == 0) {
 		in_write = true;
-		(void) cli_write_seq_cont();
+		(void) write_seq_cont();
 	} else {
 		(void) atomic_set(&api_avail, 1);
 		app_cb.status_cb(status);
 	}
 }
 
-static void cli_recv_offset_handle(const struct uart_dfu_pdu *pdu)
+static void offset_recv_handle(const struct uart_blob_pdu *pdu)
 {
 	(void) atomic_set(&api_avail, 1);
 	if (pdu->args.status.data.status < 0) {
@@ -183,16 +190,16 @@ static void cli_recv_offset_handle(const struct uart_dfu_pdu *pdu)
 	}
 }
 
-static void cli_recv_handle(const uint8_t *buf, size_t len)
+static void recv_handle(const uint8_t *buf, size_t len)
 {
 	if (len == 0) {
 		return;
 	}
 
-	const struct uart_dfu_pdu *pdu = (const struct uart_dfu_pdu *) buf;
+	const struct uart_blob_pdu *pdu = (const struct uart_blob_pdu *) buf;
 	int opcode = (int) pdu->hdr.opcode;
 
-	if (len != PDU_SIZE(sizeof(struct uart_dfu_status_args))	||
+	if (len != PDU_SIZE(sizeof(struct uart_blob_status_args))	||
 	    !pdu->hdr.status 						||
 	    rx_opcode != opcode) {
 		/* Only accept status messages with the correct length
@@ -202,76 +209,94 @@ static void cli_recv_handle(const uint8_t *buf, size_t len)
 	
 	/* Received expected message; stop timeout */
 	rx_opcode = OPCODE_NONE;
-	uart_dfu_rx_timeout_stop();
+	uart_cobs_rx_timeout_stop();
 
 	switch (opcode) {
-	case UART_DFU_OPCODE_INIT:
-		LOG_DBG("cli: received INIT");
-		cli_recv_status_handle(pdu);
+	case UART_BLOB_OPCODE_INIT:
+	case UART_BLOB_OPCODE_WRITEC:
+	case UART_BLOB_OPCODE_DONE:
+		status_recv_handle(pdu);
 		break;
-	case UART_DFU_OPCODE_DONE:
-		LOG_DBG("cli: received DONE");
-		cli_recv_status_handle(pdu);
+	case UART_BLOB_OPCODE_WRITEH:
+		writeh_recv_handle(pdu);
 		break;
-	case UART_DFU_OPCODE_WRITEC:
-		LOG_DBG("cli: received WRITEC");
-		cli_recv_status_handle(pdu);
-		break;
-	case UART_DFU_OPCODE_WRITEH:
-		LOG_DBG("cli: received WRITEH");
-		cli_recv_writeh_handle(pdu);
-		break;
-	case UART_DFU_OPCODE_OFFSET:
-		LOG_DBG("cli: received OFFSET");
-		cli_recv_offset_handle(pdu);
+	case UART_BLOB_OPCODE_OFFSET:
+		offset_recv_handle(pdu);
 		break;
 	default:
 		break;
 	}
 }
 
-static void cli_send_handle(void)
+static void send_handle(void)
 {
 	if (in_write) {
-		if (cli_write_seq_cont()) {
+		if (write_seq_cont()) {
 			return;
 		} else {
 			in_write = false;
 		}
 	}
 
-	(void) uart_dfu_rx_timeout_start(
-		CONFIG_UART_DFU_CLI_RESPONSE_TIMEOUT);
+	(void) uart_cobs_rx_timeout_start(
+		CONFIG_UART_BLOB_TX_RESPONSE_TIMEOUT);
 }
 
-static void cli_recv_abort_handle(int err)
+static void recv_abort_handle(int err)
 {
 	LOG_DBG("Client receive aborted with err: %d", err);
-	uart_dfu_sess_close(UART_DFU_SESS_CLI, err);
+	uart_cobs_user_release(cobs_user_cb, err);
 }
 
-static void cli_send_abort_handle(int err)
+static void send_abort_handle(int err)
 {
 	LOG_DBG("Client send aborted with err: %d.", err);
-	uart_dfu_sess_close(UART_DFU_SESS_CLI, err);
+	uart_cobs_user_release(cobs_user_cb, err);
 }
 
-static void cli_sess_enter_handle(void)
+static void user_start_handle(void)
 {
 	state_reset();	
 	(void) atomic_set(&api_avail, 1);
 
 	LOG_DBG("Client session started.");
-	evt_send(UART_DFU_CLI_EVT_STARTED, UART_DFU_CLI_SUCCESS);
+	evt_send(UART_BLOB_TX_EVT_STARTED, UART_BLOB_TX_SUCCESS);
 }
 
-static void cli_sess_exit_handle(int err)
+static void user_end_handle(int err)
 {
 	(void) atomic_set(&api_avail, 0);
 	state_reset();
 
 	LOG_DBG("Client session stopped.");
-	evt_send(UART_DFU_CLI_EVT_STOPPED, err_type_get(err));
+	evt_send(UART_BLOB_TX_EVT_STOPPED, err_type_get(err));
+}
+
+static void cobs_user_cb(const struct uart_cobs_evt *const evt)
+{
+	switch (evt->type) {
+	case UART_COBS_EVT_RX:
+		recv_handle(evt->data.rx.buf, evt->data.rx.len);
+		break;
+	case UART_COBS_EVT_RX_END:
+		recv_abort_handle(evt->data.err);
+		break;
+	case UART_COBS_EVT_TX_END:
+		if (evt->data.err == 0) {
+			send_handle();
+		} else {
+			send_abort_handle(evt->data.err);
+		}
+		break;
+	case UART_COBS_EVT_USER_START:
+		user_start_handle();
+		break;
+	case UART_COBS_EVT_USER_END:
+		user_end_handle(evt->data.err);
+		break;
+	default:
+		break;
+	}
 }
 
 
@@ -279,7 +304,7 @@ static void cli_sess_exit_handle(int err)
  * API helper functions
  *****************************************************************************/
 
-static int api_cli_send(struct uart_dfu_pdu *pdu, size_t len)
+static int api_send(struct uart_blob_pdu *pdu, size_t len)
 {
 	int err;
 	int opcode = pdu->hdr.opcode;
@@ -289,11 +314,11 @@ static int api_cli_send(struct uart_dfu_pdu *pdu, size_t len)
 	}
 
 	rx_opcode = opcode;
-	err = uart_dfu_rx_start(PDU_SIZE(sizeof(struct uart_dfu_status_args)));
+	err = uart_cobs_rx_start(PDU_SIZE(sizeof(struct uart_blob_status_args)));
 	if (err == 0) {
-		err = cli_send(pdu, len);
+		err = pdu_send(pdu, len);
 		if (err != 0) {
-			(void) uart_dfu_rx_stop();
+			(void) uart_cobs_rx_stop();
 		}
 	}
 	if (err != 0) {
@@ -307,42 +332,10 @@ static int api_cli_send(struct uart_dfu_pdu *pdu, size_t len)
 
 
 /*****************************************************************************
-* UART DFU API functions
-*****************************************************************************/
-
-void uart_dfu_cli_evt_handle(const struct uart_dfu_evt *const evt)
-{
-	switch (evt->type) {
-	case UART_DFU_EVT_RX:
-		cli_recv_handle(evt->data.rx.buf, evt->data.rx.len);
-		break;
-	case UART_DFU_EVT_RX_END:
-		cli_recv_abort_handle(evt->data.err);
-		break;
-	case UART_DFU_EVT_TX_END:
-		if (evt->data.err == 0) {
-			cli_send_handle();
-		} else {
-			cli_send_abort_handle(evt->data.err);
-		}
-		break;
-	case UART_DFU_EVT_SESS_ENTER:
-		cli_sess_enter_handle();
-		break;
-	case UART_DFU_EVT_SESS_EXIT:
-		cli_sess_exit_handle(evt->data.err);
-		break;
-	default:
-		break;
-	}
-}
-
-
-/*****************************************************************************
 * API functions
 *****************************************************************************/
 
-int uart_dfu_cli_init(struct uart_dfu_cli_cb *callbacks)
+int uart_blob_tx_init(struct uart_blob_tx_cb *callbacks)
 {
 	if (callbacks == NULL			||
 	    callbacks->status_cb == NULL	||
@@ -356,22 +349,36 @@ int uart_dfu_cli_init(struct uart_dfu_cli_cb *callbacks)
 	return 0;
 }
 
-
-int uart_dfu_cli_init_send(size_t file_size)
+int uart_blob_tx_enable(void)
 {
-	if (file_size > INT32_MAX) {
+	int err = uart_cobs_user_request(cobs_user_cb);
+	if (err == -EALREADY) {
+		return 0;
+	} else {
+		return err;
+	}
+}
+
+int uart_blob_tx_disable(void)
+{
+	return uart_cobs_user_release(cobs_user_cb, UART_BLOB_TX_SUCCESS);
+}
+
+int uart_blob_tx_send_init(size_t blob_len)
+{
+	if (blob_len > INT32_MAX) {
 		return -ENOMEM;
 	}
 
-	struct uart_dfu_pdu pdu;
+	struct uart_blob_pdu pdu;
 	memset(&pdu, 0, sizeof(pdu));
-	pdu.hdr.opcode = UART_DFU_OPCODE_INIT;
-	pdu.args.init.file_size = (uint32_t) file_size;
+	pdu.hdr.opcode = UART_BLOB_OPCODE_INIT;
+	pdu.args.init.blob_len = (uint32_t) blob_len;
 
-	return api_cli_send(&pdu, PDU_SIZE(sizeof(pdu.args.init)));
+	return api_send(&pdu, PDU_SIZE(sizeof(pdu.args.init)));
 }
 
-int uart_dfu_cli_write_send(const uint8_t *const buf, size_t len)
+int uart_blob_tx_send_write(const uint8_t *const buf, size_t len)
 {
 	if (buf == NULL || len == 0) {
 		return -EINVAL;
@@ -387,48 +394,33 @@ int uart_dfu_cli_write_send(const uint8_t *const buf, size_t len)
 	fragment.idx = 0;
 	fragment.len = len;
 
-	struct uart_dfu_pdu pdu;
+	struct uart_blob_pdu pdu;
 	memset(&pdu, 0, sizeof(pdu));
-	pdu.hdr.opcode = UART_DFU_OPCODE_WRITEH;
-	pdu.args.writeh.fragment_size = len;
+	pdu.hdr.opcode = UART_BLOB_OPCODE_WRITEH;
+	pdu.args.writeh.fragment_len = len;
 
-	int err = api_cli_send(&pdu, PDU_SIZE(sizeof(pdu.args.writeh)));
+	int err = api_send(&pdu, PDU_SIZE(sizeof(pdu.args.writeh)));
 	if (err != 0) {
 		fragment_init(NULL, 0);
 	}
 	return err;
 }
 
-int uart_dfu_cli_offset_send(void)
+int uart_blob_tx_send_offset(void)
 {
-	struct uart_dfu_pdu pdu;
+	struct uart_blob_pdu pdu;
 	memset(&pdu, 0, sizeof(pdu));
-	pdu.hdr.opcode = UART_DFU_OPCODE_OFFSET;
+	pdu.hdr.opcode = UART_BLOB_OPCODE_OFFSET;
 
-	return api_cli_send(&pdu, PDU_SIZE(sizeof(pdu.args.offset)));
+	return api_send(&pdu, PDU_SIZE(sizeof(pdu.args.offset)));
 }
 
-int uart_dfu_cli_done_send(bool successful)
+int uart_blob_tx_send_done(bool successful)
 {
-	struct uart_dfu_pdu pdu;
+	struct uart_blob_pdu pdu;
 	memset(&pdu, 0, sizeof(pdu));
-	pdu.hdr.opcode = UART_DFU_OPCODE_DONE;
+	pdu.hdr.opcode = UART_BLOB_OPCODE_DONE;
 	pdu.args.done.success = successful;
 
-	return api_cli_send(&pdu, PDU_SIZE(sizeof(pdu.args.done)));
-}
-
-int uart_dfu_cli_start(void)
-{
-	int err = uart_dfu_sess_open(UART_DFU_SESS_CLI);
-	if (err == -EALREADY) {
-		return 0;
-	} else {
-		return err;
-	}
-}
-
-int uart_dfu_cli_stop(void)
-{
-	return uart_dfu_sess_close(UART_DFU_SESS_CLI, UART_DFU_CLI_SUCCESS);
+	return api_send(&pdu, PDU_SIZE(sizeof(pdu.args.done)));
 }

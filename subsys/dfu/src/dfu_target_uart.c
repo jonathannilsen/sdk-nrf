@@ -9,7 +9,7 @@
 #include <logging/log.h>
 #include <sys/printk.h>
 #include <string.h>
-#include <uart_dfu_cli.h>
+#include <uart_blob_tx.h>
 #include <sys/atomic.h>
 
 
@@ -50,24 +50,24 @@ LOG_MODULE_REGISTER(dfu_target_uart, CONFIG_DFU_TARGET_LOG_LEVEL);
  * Static functions
  *****************************************************************************/
 
-static void cli_status_handle(int status)
+static void blob_tx_status_handle(int status)
 {
 	k_poll_signal_raise(&sig_cb, status);
 }
 
-static void cli_offset_handle(size_t offset)
+static void blob_tx_offset_handle(size_t offset)
 {
 	offset_res = offset;
 	k_poll_signal_raise(&sig_cb, 0);
 }
 
-static void cli_evt_handle(const struct uart_dfu_cli_evt *const evt)
+static void blob_tx_evt_handle(const struct uart_blob_tx_evt *const evt)
 {
 	switch (evt->type) {
-	case UART_DFU_CLI_EVT_STARTED:
+	case UART_BLOB_TX_EVT_STARTED:
 		k_poll_signal_raise(&sig_start, (int) evt->err);
 		break;
-	case UART_DFU_CLI_EVT_STOPPED:
+	case UART_BLOB_TX_EVT_STOPPED:
 		k_poll_signal_raise(&sig_stop, (int) evt->err);
 		break;
 	default:
@@ -75,21 +75,21 @@ static void cli_evt_handle(const struct uart_dfu_cli_evt *const evt)
 	}
 }
 
-static void cli_start_wait(void)
+static void blob_tx_start_wait(void)
 {
 	k_poll(sig_start_event, 1, K_FOREVER);
 	sig_start_event->state = K_POLL_STATE_NOT_READY;
 	k_poll_signal_reset(&sig_start);
 }
 
-static void cli_stop_wait(void)
+static void blob_tx_stop_wait(void)
 {
 	k_poll(sig_stop_event, 1, K_FOREVER);
 	sig_stop_event->state = K_POLL_STATE_NOT_READY;
 	k_poll_signal_reset(&sig_stop);
 }
 
-static int cli_stop_cb_wait(int *status, size_t *offset)
+static int blob_tx_stop_cb_wait(int *status, size_t *offset)
 {
 	int result = 0;
 
@@ -111,26 +111,27 @@ static int cli_stop_cb_wait(int *status, size_t *offset)
 	return result;
 }
 
-static int cli_status_wait(int *status)
+static int blob_tx_status_wait(int *status)
 {
-	return cli_stop_cb_wait(status, NULL);
+	return blob_tx_stop_cb_wait(status, NULL);
 }
 
-static int cli_offset_wait(int *status, size_t *offset)
+static int blob_tx_offset_wait(int *status, size_t *offset)
 {
-	return cli_stop_cb_wait(status, offset);
+	return blob_tx_stop_cb_wait(status, offset);
 }
 
-static int cli_init(void)
+static int blob_tx_init(void)
 {
-	struct uart_dfu_cli_cb cli_cb;
-	cli_cb.status_cb	= cli_status_handle;
-	cli_cb.offset_cb	= cli_offset_handle;
-	cli_cb.evt_cb		= cli_evt_handle;
-	return uart_dfu_cli_init(&cli_cb);
+	struct uart_blob_tx_cb blob_tx_cb = {
+		.status_cb	= blob_tx_status_handle;
+		.offset_cb	= blob_tx_offset_handle;
+		.evt_cb		= blob_tx_evt_handle;
+	};
+	return uart_blob_tx_init(&blob_tx_cb);
 }
 
-static void session_state_reset(void)
+static void update_state_reset(void)
 {
 	k_poll_signal_reset(&sig_start);
 	k_poll_signal_reset(&sig_stop);
@@ -144,7 +145,7 @@ static void session_state_reset(void)
  * API functions
  *****************************************************************************/
 
-bool dfu_target_uart_identify(const void * const buf)
+bool dfu_target_uart_identify(const void *const buf)
 {
 	return memcmp(buf, uart_header_magic, sizeof(uart_header_magic)) == 0;
 }
@@ -156,26 +157,26 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 		return -EINVAL;
 	}
 
-	session_state_reset();
+	update_state_reset();
 	if (!initialized) {
-		err = cli_init();
+		err = blob_tx_init();
 		if (err != 0) {
 			return err;
 		}
 		initialized = true;
 	}
 
-	err = uart_dfu_cli_start();
+	err = uart_blob_tx_start();
 	if (err == -EINPROGRESS) {
 		/* Wait for start */
 		LOG_DBG("Waiting for client start.");
-		cli_start_wait();
+		blob_tx_start_wait();
 	} else if (err != 0) {
 		LOG_ERR("Unable to start client: %d", err);
 		return err;
 	}
 
-	err = uart_dfu_cli_init_send(file_size - sizeof(uart_header_magic));
+	err = uart_blob_tx_send_init(file_size - sizeof(uart_header_magic));
 	if (err != 0) {
 		LOG_ERR("Error sending init: %d", err);
 		return err;
@@ -183,7 +184,7 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 
 	/* Wait for reply. */
 	int status;
-	err = cli_status_wait(&status);
+	err = blob_tx_status_wait(&status);
 	if (err == 0) {
 		LOG_DBG("Init sent. Received: %d.", status);
 		return status;
@@ -193,13 +194,13 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 	}
 }
 
-int dfu_target_uart_offset_get(size_t * offset)
+int dfu_target_uart_offset_get(size_t *offset)
 {
 	if (offset == NULL) {
 		return -EINVAL;
 	}
 
-	int err = uart_dfu_cli_offset_send();
+	int err = uart_blob_tx_send_offset();
 	if (err != 0) {
 		LOG_ERR("Error sending offset: %d", err);
 		return err;
@@ -207,7 +208,7 @@ int dfu_target_uart_offset_get(size_t * offset)
 
 	/* Wait for reply. */
 	int status;
-	err = cli_offset_wait(&status, offset);
+	err = blob_tx_offset_wait(&status, offset);
 	if (err == 0) {
 		LOG_DBG("Offset sent. Received status: %d, offset: %u.",
 			status, *offset);
@@ -218,7 +219,7 @@ int dfu_target_uart_offset_get(size_t * offset)
 	}
 }
 
-int dfu_target_uart_write(const void * const buf, size_t len)
+int dfu_target_uart_write(const void *const buf, size_t len)
 {
 	uint8_t * data;
 	size_t data_len;
@@ -245,7 +246,7 @@ int dfu_target_uart_write(const void * const buf, size_t len)
 		data_len = len;
 	}
 
-	int err = uart_dfu_cli_write_send(data, data_len);
+	int err = uart_blob_tx_send_write(data, data_len);
 	if (err != 0) {
 		LOG_ERR("Error sending write: %d", err);
 		return err;
@@ -254,7 +255,7 @@ int dfu_target_uart_write(const void * const buf, size_t len)
 
 	/* Wait for reply. */
 	int status;
-	err = cli_status_wait(&status);
+	err = blob_tx_status_wait(&status);
 	if (err == 0) {
 		LOG_DBG("Write sent. Received: %d.", status);
 		return status;
@@ -267,10 +268,10 @@ int dfu_target_uart_write(const void * const buf, size_t len)
 int dfu_target_uart_done(bool successful)
 {
 	int status;
-	int err = uart_dfu_cli_done_send(successful);
+	int err = uart_blob_tx_send_done(successful);
 	if (err == 0) {
 		/* Wait for reply. */
-		err = cli_status_wait(&status);
+		err = blob_tx_status_wait(&status);
 		if (err == 0) {
 			LOG_DBG("Done sent. Received: %d.", status);
 		} else {
@@ -282,15 +283,15 @@ int dfu_target_uart_done(bool successful)
 		status = err;
 	}
 
-	err = uart_dfu_cli_stop();
+	err = uart_blob_tx_stop();
 	if (err == -EINPROGRESS) {
 		/* Wait for stop. */
 		LOG_DBG("Waiting for client stop.");
-		cli_stop_wait();
+		blob_tx_stop_wait();
 	} else if (err != 0) {
 		LOG_ERR("Unable to stop client: %d", err);
 	}
 
-	session_state_reset();
+	update_state_reset();
 	return status;
 }
