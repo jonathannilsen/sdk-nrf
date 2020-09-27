@@ -29,7 +29,7 @@ struct fragment_out {
 * Forward declarations 
 *****************************************************************************/
 
-static void cobs_user_cb(const struct uart_cobs_evt *const evt)
+static void cobs_user_cb(const struct uart_cobs_evt *const evt);
 
 
 /*****************************************************************************
@@ -143,12 +143,9 @@ static uint32_t rx_size_get(void)
 
 
 /*
- * Message handler functions
+ * UART COBS handler functions
  *****************************************************************************/
 
-/**
- * @brief Handle reception of UART_BLOB_OPCODE_INIT
- */
 static int init_recv_handle(const struct uart_blob_pdu *pdu,
 				size_t len,
 				struct uart_blob_pdu *rsp)
@@ -157,9 +154,9 @@ static int init_recv_handle(const struct uart_blob_pdu *pdu,
 		return -ENOENT;
 	}
 	if (opcode_accept(pdu->hdr.opcode, OPCODE_ANY)) {
-		int err = uart_cobs_user_request();
+		int err = uart_cobs_user_start(cobs_user_cb);
 		if (err != 0 && err != -EALREADY) {
-			/* Session is busy. */
+			/* Busy. */
 			return -ENOENT;
 		}
 		int status = app_cb.init_cb(pdu->args.init.blob_len);
@@ -170,9 +167,6 @@ static int init_recv_handle(const struct uart_blob_pdu *pdu,
 	}
 }
 
-/**
- * @brief Handle reception of UART_BLOB_OPCODE_WRITEH
- */
 static int writeh_recv_handle(const struct uart_blob_pdu *pdu,
 				  size_t len,
 				  struct uart_blob_pdu *rsp)
@@ -193,9 +187,6 @@ static int writeh_recv_handle(const struct uart_blob_pdu *pdu,
 	}
 }
 
-/**
- * @brief Handle reception of UART_BLOB_OPCODE_WRITEC
- */
 static int writec_recv_handle(const struct uart_blob_pdu *pdu,
 				  size_t len,
 				  struct uart_blob_pdu *rsp)
@@ -226,9 +217,6 @@ static int writec_recv_handle(const struct uart_blob_pdu *pdu,
 	}
 }
 
-/**
- * @brief Handle reception of UART_BLOB_OPCODE_OFFSET
- */
 static int offset_recv_handle(const struct uart_blob_pdu *pdu,
 				  size_t len,
 				  struct uart_blob_pdu *rsp)
@@ -256,9 +244,6 @@ static int offset_recv_handle(const struct uart_blob_pdu *pdu,
 	}
 }
 
-/**
- * @brief Handle reception of UART_BLOB_OPCODE_DONE
- */
 static int done_recv_handle(const struct uart_blob_pdu *pdu,
 				size_t len,
 				struct uart_blob_pdu *rsp)
@@ -291,27 +276,22 @@ static void recv_handle(const uint8_t *buf, size_t len)
 	
 	switch (pdu->hdr.opcode) {
 	case UART_BLOB_OPCODE_INIT:
-		LOG_DBG("srv: received INIT");
 		err = init_recv_handle(pdu, len, &rsp);
 		break;
 	case UART_BLOB_OPCODE_WRITEH:
-		LOG_DBG("srv: received WRITEH");
 		err = writeh_recv_handle(pdu, len, &rsp);
 		break;
 	case UART_BLOB_OPCODE_WRITEC:
-		LOG_DBG("srv: received WRITEC");
 		err = writec_recv_handle(pdu, len, &rsp);
 		break;
 	case UART_BLOB_OPCODE_OFFSET:
-		LOG_DBG("srv: received OFFSET");
 		err = offset_recv_handle(pdu, len, &rsp);
 		break;
 	case UART_BLOB_OPCODE_DONE:
-		LOG_DBG("srv: received DONE");
 		err = done_recv_handle(pdu, len, &rsp);
 		break;
 	default:
-		LOG_ERR("srv: received unknown opcode %d", pdu->hdr.opcode);
+		LOG_ERR("Received unknown opcode %d", pdu->hdr.opcode);
 		err = -ENOENT;
 		break;
 	}
@@ -335,8 +315,8 @@ static void recv_handle(const uint8_t *buf, size_t len)
 static void send_handle(void)
 {
 	if (done_pending) {
-		(void) uart_cobs_user_release(cobs_user_cb,
-					      UART_BLOB_RX_SUCCESS);
+		(void) uart_cobs_user_end(cobs_user_cb,
+					  UART_BLOB_RX_SUCCESS);
 	} else {
 		(void) uart_cobs_rx_timeout_start(
 			CONFIG_UART_BLOB_RX_RESPONSE_TIMEOUT);
@@ -345,20 +325,17 @@ static void send_handle(void)
 
 static void recv_abort_handle(int err)
 {
-	LOG_DBG("Server receive aborted with err: %d", err);
-	(void) uart_cobs_user_release(cobs_user_cb, err_type_get(err));
+	(void) uart_cobs_user_end(cobs_user_cb, err_type_get(err));
 }
 
 static void send_abort_handle(int err)
 {
-	LOG_DBG("Server send aborted with err: %d", err);
-	(void) uart_cobs_user_release(cobs_user_cb, err_type_get(err));
+	(void) uart_cobs_user_end(cobs_user_cb, err_type_get(err));
 }
 
 static void user_start_handle(void)
 {
 	done_pending = false;
-	LOG_DBG("Server session started.");
 	evt_send(UART_BLOB_RX_EVT_STARTED, UART_BLOB_RX_SUCCESS);
 }
 
@@ -370,7 +347,6 @@ static void user_end_handle(int err)
 	} else {
 		rx_state = OPCODE_NONE;
 	}
-	LOG_DBG("Server session stopped.");
 	evt_send(UART_BLOB_RX_EVT_STOPPED, err_type_get(err));
 }
 
@@ -465,7 +441,7 @@ void uart_blob_rx_enable(void)
 
 int uart_blob_rx_disable(void)
 {
-	int err = uart_cobs_user_release(cobs_user_cb, UART_BLOB_RX_ERR_ABORT);
+	int err = uart_cobs_user_end(cobs_user_cb, UART_BLOB_RX_ERR_ABORT);
 	if (err == -EBUSY) {
 		rx_state = OPCODE_NONE;
 		return 0;

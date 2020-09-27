@@ -7,10 +7,9 @@
 #include <zephyr.h>
 #include <sys/printk.h>
 #include <logging/log.h>
-#include <uart_dfu.h>
 #include <dfu/dfu_target.h>
+#include <uart_blob_rx.h>
 #include <uart_dfu_host.h>
-#include <uart_dfu_srv.h>
 
 
 /*****************************************************************************
@@ -55,8 +54,8 @@ static int blob_init_handle(size_t blob_len)
 		return -EINVAL;
 	}
 	if (total_len == 0) {
-		total_len = file_size;
-		LOG_INF("Initialized(file_size=%u)", file_size);
+		total_len = blob_len;
+		LOG_INF("Initialized(file_size=%u)", blob_len);
 		return 0;
 	} else {
 		LOG_ERR("Initialize failed: busy.");
@@ -79,9 +78,9 @@ static int blob_offset_handle(size_t *offset)
 }
 
 static int blob_write_handle(const uint8_t *const fragment_buf,
-			    size_t fragment_size)
+			    size_t fragment_len)
 {
-	LOG_INF("Write(fragment_size=%u)", fragment_size);
+	LOG_INF("Write(fragment_len=%u)", fragment_len);
 
 	if (total_len == 0) {
 		/* Write received without init first */
@@ -91,7 +90,7 @@ static int blob_write_handle(const uint8_t *const fragment_buf,
 		/* First fragment, initialize. */
 		int img_type;
 
-		img_type = dfu_target_img_type(fragment_buf, fragment_size);
+		img_type = dfu_target_img_type(fragment_buf, fragment_len);
 		if (img_type < 0) {
 			return img_type;
 		}
@@ -104,7 +103,7 @@ static int blob_write_handle(const uint8_t *const fragment_buf,
 
 		initialized = true;
 	}
-	return dfu_target_write(fragment_buf, fragment_size);
+	return dfu_target_write(fragment_buf, fragment_len);
 }
 
 static int blob_done_handle(bool successful)
@@ -118,13 +117,13 @@ static int blob_done_handle(bool successful)
 	return err;
 }
 
-static void blob_evt_handle(const struct uart_dfu_srv_evt *const evt)
+static void blob_evt_handle(const struct uart_blob_rx_evt *const evt)
 {
 	switch (evt->type) {
-	case UART_DFU_SRV_EVT_STARTED:
+	case UART_BLOB_RX_EVT_STARTED:
 		k_poll_signal_reset(&sig_stop);
 		break;
-	case UART_DFU_SRV_EVT_STOPPED:
+	case UART_BLOB_RX_EVT_STOPPED:
 		if (initialized) {
 			(void) dfu_target_reset();
 			state_reset();
@@ -153,7 +152,7 @@ static void blob_rx_stop_wait(void)
 
 void uart_dfu_host_init(void)
 {
-	struct uart_dfu_srv_cb callbacks;
+	struct uart_blob_rx_cb callbacks;
 
 	state_reset();
 
@@ -163,19 +162,19 @@ void uart_dfu_host_init(void)
 	callbacks.done_cb	= blob_done_handle;
 	callbacks.evt_cb	= blob_evt_handle;
 
-	(void) uart_dfu_srv_init(fragment,
-				CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE,
-				&callbacks);
+	(void) uart_blob_rx_init(fragment,
+				 CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE,
+				 &callbacks);
 }
 
 void uart_dfu_host_enable(void)
 {
-	uart_dfu_srv_enable();
+	uart_blob_rx_enable();
 }
 
 void uart_dfu_host_disable(void)
 {
-	int err = uart_dfu_srv_disable();
+	int err = uart_blob_rx_disable();
 	if (err == -EINPROGRESS) {
 		/* Wait for stop */
 		blob_rx_stop_wait();

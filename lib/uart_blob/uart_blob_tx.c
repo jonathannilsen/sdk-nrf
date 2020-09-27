@@ -114,6 +114,9 @@ static int pdu_send(const struct uart_blob_pdu *pdu, size_t len)
 {
 	uint8_t *buf = uart_cobs_tx_buf_get();
 	memcpy(buf, pdu, len);
+
+	LOG_DBG("Sending opcode 0x%02X", pdu->hdr.opcode);
+
 	return uart_cobs_tx_start(len, CONFIG_UART_BLOB_TX_SEND_TIMEOUT);
 }
 
@@ -129,6 +132,8 @@ static bool writec_send(void)
 	uint8_t *buf = uart_cobs_tx_buf_get();
 	memcpy(&buf[0], &hdr, sizeof(hdr));
 	memcpy(&buf[sizeof(hdr)], seg_data, seg_len);
+
+	LOG_DBG("Sending opcode 0x%02X", hdr.opcode);
 
 	int err = uart_cobs_tx_start(sizeof(hdr) + seg_len,
 				CONFIG_UART_BLOB_TX_SEND_TIMEOUT);
@@ -158,7 +163,7 @@ static bool write_seq_cont(void)
 
 
 /*
- * Event handler functions
+ * UART COBS handler functions
  *****************************************************************************/
 
 static void status_recv_handle(const struct uart_blob_pdu *pdu)
@@ -170,7 +175,6 @@ static void status_recv_handle(const struct uart_blob_pdu *pdu)
 static void writeh_recv_handle(const struct uart_blob_pdu *pdu)
 {
 	int status = pdu->args.status.data.status;
-
 	if (status == 0) {
 		in_write = true;
 		(void) write_seq_cont();
@@ -244,22 +248,18 @@ static void send_handle(void)
 
 static void recv_abort_handle(int err)
 {
-	LOG_DBG("Client receive aborted with err: %d", err);
-	uart_cobs_user_release(cobs_user_cb, err);
+	(void) uart_cobs_user_end(cobs_user_cb, err);
 }
 
 static void send_abort_handle(int err)
 {
-	LOG_DBG("Client send aborted with err: %d.", err);
-	uart_cobs_user_release(cobs_user_cb, err);
+	(void) uart_cobs_user_end(cobs_user_cb, err);
 }
 
 static void user_start_handle(void)
 {
 	state_reset();	
 	(void) atomic_set(&api_avail, 1);
-
-	LOG_DBG("Client session started.");
 	evt_send(UART_BLOB_TX_EVT_STARTED, UART_BLOB_TX_SUCCESS);
 }
 
@@ -267,8 +267,6 @@ static void user_end_handle(int err)
 {
 	(void) atomic_set(&api_avail, 0);
 	state_reset();
-
-	LOG_DBG("Client session stopped.");
 	evt_send(UART_BLOB_TX_EVT_STOPPED, err_type_get(err));
 }
 
@@ -306,21 +304,21 @@ static void cobs_user_cb(const struct uart_cobs_evt *const evt)
 
 static int api_send(struct uart_blob_pdu *pdu, size_t len)
 {
-	int err;
-	int opcode = pdu->hdr.opcode;
-
 	if (!atomic_cas(&api_avail, 1, 0)) {
 		return -EBUSY;
 	}
 
+	int opcode = pdu->hdr.opcode;
 	rx_opcode = opcode;
-	err = uart_cobs_rx_start(PDU_SIZE(sizeof(struct uart_blob_status_args)));
+	int err = uart_cobs_rx_start(
+			PDU_SIZE(sizeof(struct uart_blob_status_args)));
 	if (err == 0) {
 		err = pdu_send(pdu, len);
 		if (err != 0) {
 			(void) uart_cobs_rx_stop();
 		}
 	}
+
 	if (err != 0) {
 		rx_opcode = OPCODE_NONE;
 		(void) atomic_set(&api_avail, 1);
@@ -351,7 +349,7 @@ int uart_blob_tx_init(struct uart_blob_tx_cb *callbacks)
 
 int uart_blob_tx_enable(void)
 {
-	int err = uart_cobs_user_request(cobs_user_cb);
+	int err = uart_cobs_user_start(cobs_user_cb);
 	if (err == -EALREADY) {
 		return 0;
 	} else {
@@ -361,7 +359,7 @@ int uart_blob_tx_enable(void)
 
 int uart_blob_tx_disable(void)
 {
-	return uart_cobs_user_release(cobs_user_cb, UART_BLOB_TX_SUCCESS);
+	return uart_cobs_user_end(cobs_user_cb, UART_BLOB_TX_SUCCESS);
 }
 
 int uart_blob_tx_send_init(size_t blob_len)
@@ -383,7 +381,6 @@ int uart_blob_tx_send_write(const uint8_t *const buf, size_t len)
 	if (buf == NULL || len == 0) {
 		return -EINVAL;
 	}
-
 	if (len > INT32_MAX) {
 		return -ENOMEM;
 	}

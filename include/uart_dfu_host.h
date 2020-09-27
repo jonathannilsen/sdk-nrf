@@ -7,10 +7,6 @@
 #ifndef UART_DFU_HOST_H__
 #define UART_DFU_HOST_H__
 
-#include <zephyr.h>
-#include <sys/atomic.h>
-#include <uart_dfu.h>
-
 /**
  * @file uart_dfu_host.h
  * @defgroup uart_dfu_host UART DFU host.
@@ -28,12 +24,12 @@
 void uart_dfu_host_init(void);
 
 /**
- * @brief Enable the UART DFU host to enable file transfer.
+ * @brief Enable the UART DFU host to accept incoming firmware upgrades.
  */
 void uart_dfu_host_enable(void);
 
 /**
- * @brief Disable the UART DFU host, aborting any ongoing actions.
+ * @brief Disable the UART DFU host, aborting any ongoing firmware upgrades.
  */
 void uart_dfu_host_disable(void);
 

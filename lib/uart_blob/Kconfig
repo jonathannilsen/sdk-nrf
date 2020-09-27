@@ -6,6 +6,11 @@
 
 menu "UART BLOB transfer"
 
+config UART_BLOB
+	bool "UART BLOB transfer"
+	depends on UART_COBS
+	depends on UART_BLOB_TX || UART_BLOB_RX
+
 # Default config values 
 
 config UART_BLOB_DEFAULT_SEND_TIMEOUT
@@ -50,11 +55,11 @@ if UART_BLOB_RX
 
 config UART_BLOB_RX_SEND_TIMEOUT
 	int "UART BLOB receiver send timeout (ms)"
-	default UART_DFU_DEFAULT_SEND_TIMEOUT
+	default UART_BLOB_DEFAULT_SEND_TIMEOUT
 
 config UART_BLOB_RX_RESPONSE_TIMEOUT
 	int "UART BLOB receiver response timeout (ms)"
-	default UART_DFU_DEFAULT_RESPONSE_TIMEOUT
+	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
 
 module=UART_BLOB_RX
 module-str=UART BLOB receiver

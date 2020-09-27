@@ -155,7 +155,7 @@ if(CONFIG_BOOTLOADER_MCUBOOT)
       set(zb_add_ota_header_cmd "")
     endif(CONFIG_ZIGBEE)
 
-  if (CONFIG_UART_DFU_LIBRARY)
+  if (CONFIG_UART_DFU_HOST)
     set(uart_dfu_add_header_cmd
       ${PYTHON_EXECUTABLE}
       ${NRF_DIR}/scripts/bootloader/uart_dfu_add_header.py
@@ -164,7 +164,7 @@ if(CONFIG_BOOTLOADER_MCUBOOT)
       )
     else()
       set(uart_dfu_add_header_cmd "")
-    endif(CONFIG_UART_DFU_LIBRARY)  
+    endif(CONFIG_UART_DFU_HOST)  
 
   set(app_offset $<TARGET_PROPERTY:partition_manager,PM_MCUBOOT_PRIMARY_SIZE>)
 

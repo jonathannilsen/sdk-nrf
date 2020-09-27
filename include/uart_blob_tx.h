@@ -7,7 +7,6 @@
 #ifndef UART_BLOB_TX_H__
 #define UART_BLOB_TX_H__
 
-#include <uart_cobs.h>
 #include <zephyr.h>
 
 

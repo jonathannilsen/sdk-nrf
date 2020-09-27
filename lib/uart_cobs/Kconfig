@@ -23,4 +23,8 @@ config UART_COBS_THREAD_STACK_SIZE
 	int "UART COBS library workqueue thread stack size"
 	default 1024
 
+module=UART_COBS
+module-str=UART COBS library
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
 endmenu
