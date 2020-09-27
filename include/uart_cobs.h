@@ -10,18 +10,14 @@
 #include <stddef.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include <sys/atomic.h>
 
 
-/*****************************************************************************
-* Macros 
-*****************************************************************************/
-
-#define UART_COBS_USER_DEF(_name, _cb)		\
-	static struct uart_cobs_user _name = {	\
-		.cb = _cb			\
-	}
-
+/**
+ * @file uart_cobs.h
+ * @defgroup uart_cobs UART COBS library.
+ * @{
+ * @brief UART COBS library API.
+ */
 
 /*****************************************************************************
 * Structure defintions 
@@ -43,7 +39,9 @@ enum uart_cobs_evt_type {
 
 /** UART COBS event structure. */
 struct uart_cobs_evt {
+	/** Event type. */
 	enum uart_cobs_evt_type type;
+	/** Event data. */
 	union {
 		/** Event structure used by UART_COBS_EVT_RX. */
 		struct {
@@ -61,9 +59,6 @@ struct uart_cobs_evt {
 /** UART COBS event callback signature. */
 typedef void (*uart_cobs_cb_t)(const struct uart_cobs_evt *const evt);
 
-struct uart_cobs_user {
-	uart_cobs_cb_t cb;
-};
 
 /*****************************************************************************
 * API functions
@@ -137,19 +132,34 @@ void uart_cobs_rx_timeout_stop(void);
 int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb);
 
 /**
- * @brief 
+ * @brief Set user event handler and switch to user.
+ * @param user_cb Event handler.
+ * @retval 0 Switched to @p user_cb synchronously.
+ * @retval -EINPROGRESS Started asynchronous switch to @p user_cb .
+ * @retval -EINVAL @p user_cb was NULL. 
+ * @retval -EBUSY Another user is already active (i.e. not in the idle state).
+ * @retval -EALREADY @p user_cb is already active.
  */
 int uart_cobs_user_start(uart_cobs_cb_t user_cb);
 
 /**
- * 
+ * @brief Disable 
+ * @param user_cb Event handler.
+ * @param err Error code to be passed to event handler.
+ * @retval 0 Switched to the idle state synchronously.
+ * @retval -EINPROGRESS Started asynchronous switch to the idle state.
+ * @retval -EINVAL @p user_cb was NULL. 
+ * @retval -EBUSY The given user is not active.
  */
 int uart_cobs_user_end(uart_cobs_cb_t user_cb, int err);
 
 /**
- * 
+ * @brief Check if currently in the UART COBS workqueue thread context.
+ * @returns true if in the workqueue thread, false otherwise.
  */
 bool uart_cobs_in_work_q_thread(void);
 
+
+/** @} */
 
 #endif  /* UART_COBS_H__ */

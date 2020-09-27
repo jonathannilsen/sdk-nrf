@@ -19,7 +19,7 @@ config DFU_THREAD
 
 config DFU_THREAD_PRIO
 	int "Priority level of the DFU thread"
-	range UART_DFU_LIBRARY_THREAD_PRIO NUM_PREEMPT_PRIORITIES
+	range UART_COBS_THREAD_PRIO NUM_PREEMPT_PRIORITIES
 	default 0 if !MULTITHREADING
 	default 12
 	depends on DFU_THREAD

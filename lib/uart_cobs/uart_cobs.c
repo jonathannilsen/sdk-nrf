@@ -18,8 +18,10 @@
 * Macros
 *****************************************************************************/
 
-#define EVT_SEND	 ((uart_cobs_cb_t) atomic_ptr_get(&state.user.current))
+/* Devicetree node for the chosen UART controller. */
+#define UART_COBS_DT	 DT_CHOSEN(nordic_cobs_uart_controller)
 
+#define EVT_SEND	 ((uart_cobs_cb_t) atomic_ptr_get(&state.user.current))
 #define LOG_DBG_DEV(...) LOG_DBG(DT_LABEL(UART_COBS_DT) ": " __VA_ARGS__)
 
 /* Compile-time validation of chosen UART controller. */
@@ -92,9 +94,9 @@ K_THREAD_STACK_DEFINE(work_q_stack_area,
 * Static functions
 *****************************************************************************/
 
-bool status_error_set(atomic_t *status, int err)
+static bool status_error_set(atomic_t *status, int err)
 {
-	return atomic_cas(status, STATUS_ON, err));
+	return atomic_cas(status, STATUS_ON, err);
 }
 
 static inline bool rx_error_set(int err)
@@ -139,7 +141,7 @@ static bool user_sw_ready(void)
 	/* Check current RX status. */
 	switch (atomic_get(&state.rx.status)) {
 	case STATUS_OFF:
-		state.rx.processing = false; // TODO: necessary?
+		state.rx.processing = false;
 		uart_cobs_rx_timeout_stop();
 		break;
 	case STATUS_ON:
@@ -171,13 +173,15 @@ static bool user_sw_ready(void)
 
 static void user_sw_finish(void)
 {
-	LOG_DBG_DEV("Exiting from session %d", state.user.pending.from);
+	LOG_DBG_DEV("User end: %lu",
+		    (long unsigned int) state.user.pending.from);
 	user_end(state.user.pending.from, state.user.pending.err);
 
-	LOG_DBG_DEV("Entering session %d", state.user.pending.to);
+	LOG_DBG_DEV("User start: %lu",
+		    (long unsigned int) state.user.pending.to);
 	__ASSERT(atomic_get(&state.rx.status) == STATUS_OFF &&
 		 atomic_get(&state.tx.status) == STATUS_OFF,
-		 "Expected RX and TX to be off before entering session");
+		 "Expected RX and TX to be off before switching user");
 	(void) atomic_ptr_set(&state.user.current, state.user.pending.to);
 	user_start();
 }
@@ -193,8 +197,8 @@ static int user_sw_prepare(uart_cobs_cb_t from, uart_cobs_cb_t to, int err)
 		return -EBUSY;
 	}
 
-	LOG_DBG_DEV("Session switch from %lu to %lu",
-		(void *) from, (void *) to);
+	LOG_DBG_DEV("User switch from %lu to %lu",
+		    (long unsigned int) from, (long unsigned int) to);
 
 	state.user.pending.from	= from;
 	state.user.pending.to	= to;
@@ -310,7 +314,7 @@ static void rx_dis_process(struct k_work *work)
 
 	atomic_val_t status = atomic_set(&state.rx.status, STATUS_OFF);
 
-	if (status > 0) {
+	if (status == STATUS_ON) {
 		if (state.rx.processing) {
 			rx_process();
 		}
@@ -318,11 +322,12 @@ static void rx_dis_process(struct k_work *work)
 		/* Malformed data. Reset and resume reception. */
 		state.rx.processing = false;
 		cobs_dec_reset(&state.rx.decoder);
+		(void) atomic_set(&state.rx.status, STATUS_ON);
 		rx_resume();
 	} else {
 		/* Fatal error. */
 		LOG_DBG_DEV("RX stopped with error: %d", status);
-		state.rx.processing = false;  // TODO: necessary?
+		state.rx.processing = false;
 		send_evt_end(UART_COBS_EVT_RX_END, status);
 	}
 }
@@ -468,7 +473,7 @@ static int uart_cobs_sys_init(struct device *dev)
 	cobs_dec_init(&state.rx.decoder, state.rx.decoded_buf);
 
 	state.user.idle = no_evt_handle;
-	(void) atomic_set(&state.user.current, state.user.idle);
+	(void) atomic_ptr_set(&state.user.current, state.user.idle);
 
 	k_work_init(&state.work.rx_dis, rx_dis_process);
 	k_work_init(&state.work.tx_dis, tx_dis_process);
@@ -557,7 +562,6 @@ int uart_cobs_rx_stop(void)
 
 void uart_cobs_rx_timeout_start(int timeout)
 {
-	/* FIXME: check that RX is on? */
 	k_timer_start(&state.rx.timer, K_MSEC(timeout), K_NO_WAIT);
 }
 
@@ -575,7 +579,7 @@ int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb)
 
 	/* Switch to empty idle handler first to lock the user state,
 	   preventing other switches from messing up the state. */
-	if (!atomic_cas(&state.user.current, state.user.idle, no_evt_handle)) {
+	if (!atomic_ptr_cas(&state.user.current, state.user.idle, no_evt_handle)) {
 		return -EBUSY;
 	}
 	
@@ -585,7 +589,7 @@ int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb)
 		return -EALREADY;
 	}
 
-	(void) user_sw_prepare(prev_cb, idle_cb);
+	(void) user_sw_prepare(prev_cb, idle_cb, 0);
 	return 0;
 }
 

@@ -17,11 +17,8 @@
 #include <modem/modem_key_mgmt.h>
 #include <net/fota_download.h>
 #include <dfu/mcuboot.h>
-#include <uart_dfu.h>
 #include <uart_dfu_host.h>
 
-#define UART_DFU_PC_INSTANCE	0
-#define UART_DFU_NRF52_INSTANCE	1
 #define LED_PORT		DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
 #define TLS_SEC_TAG 		42
 

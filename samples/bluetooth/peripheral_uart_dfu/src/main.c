@@ -10,7 +10,6 @@
 #include <sys/ring_buffer.h>
 #include <string.h>
 
-#include <uart_dfu.h>
 #include <uart_dfu_host.h>
 #include <dfu/dfu_target.h>
 #include <dfu/mcuboot.h>

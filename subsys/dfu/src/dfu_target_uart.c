@@ -13,6 +13,8 @@
 #include <sys/atomic.h>
 
 
+/* TODO: Ensure that done can be sent after timeout. */
+
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
@@ -124,9 +126,9 @@ static int blob_tx_offset_wait(int *status, size_t *offset)
 static int blob_tx_init(void)
 {
 	struct uart_blob_tx_cb blob_tx_cb = {
-		.status_cb	= blob_tx_status_handle;
-		.offset_cb	= blob_tx_offset_handle;
-		.evt_cb		= blob_tx_evt_handle;
+		.status_cb	= blob_tx_status_handle,
+		.offset_cb	= blob_tx_offset_handle,
+		.evt_cb		= blob_tx_evt_handle
 	};
 	return uart_blob_tx_init(&blob_tx_cb);
 }
@@ -166,7 +168,7 @@ int dfu_target_uart_init(size_t file_size, dfu_target_callback_t cb)
 		initialized = true;
 	}
 
-	err = uart_blob_tx_start();
+	err = uart_blob_tx_enable();
 	if (err == -EINPROGRESS) {
 		/* Wait for start */
 		LOG_DBG("Waiting for client start.");
@@ -283,7 +285,7 @@ int dfu_target_uart_done(bool successful)
 		status = err;
 	}
 
-	err = uart_blob_tx_stop();
+	err = uart_blob_tx_disable();
 	if (err == -EINPROGRESS) {
 		/* Wait for stop. */
 		LOG_DBG("Waiting for client stop.");
