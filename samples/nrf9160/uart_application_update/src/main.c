@@ -3,11 +3,9 @@
  *
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
-
 #include <zephyr.h>
 #include <drivers/gpio.h>
 #include <drivers/flash.h>
-#include <logging/log.h>
 #include <bsd.h>
 #include <sys/atomic.h>
 #include <modem/lte_lc.h>
@@ -33,7 +31,6 @@ void bsd_recoverable_error_handler(uint32_t err)
 {
 	printk("bsdlib recoverable error: %u\n", err);
 }
-
 
 int cert_provision(void)
 {
@@ -79,7 +76,6 @@ int cert_provision(void)
 	return 0;
 }
 
-
 static void dfu_buttons_enable(void)
 {
 	gpio_pin_interrupt_configure(gpiob,
@@ -90,7 +86,6 @@ static void dfu_buttons_enable(void)
 				GPIO_INT_EDGE_TO_ACTIVE);
 }
 
-
 static void dfu_buttons_disable(void)
 {
 	gpio_pin_interrupt_configure(gpiob,
@@ -100,7 +95,6 @@ static void dfu_buttons_disable(void)
 				DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
 				GPIO_INT_DISABLE);
 }
-
 
 /**@brief Start transfer of the file. */
 static void app_dfu_transfer_start(struct k_work *unused)
@@ -121,14 +115,14 @@ static void app_dfu_transfer_start(struct k_work *unused)
 		retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
 					     CONFIG_DOWNLOAD_NRF91_FILE,
 					     sec_tag,
-					     CONFIG_DOWNLOAD_PORT,
-					     apn);
+					     apn,
+					     0);
 	} else if (sw_no == BIT(1)) {
 		retval = fota_download_start(CONFIG_DOWNLOAD_HOST,
 					     CONFIG_DOWNLOAD_NRF52_FILE,
 					     sec_tag,
-					     CONFIG_DOWNLOAD_PORT,
-					     apn);
+					     apn,
+					     0);
 	} else {
 		retval = -EINVAL;
 	}
@@ -141,7 +135,6 @@ static void app_dfu_transfer_start(struct k_work *unused)
 	}
 
 }
-
 
 /**@brief Turn on LED0 and LED1 if CONFIG_APPLICATION_VERSION
  * is 2 and LED0 otherwise.
@@ -168,7 +161,6 @@ static int led_app_version(void)
 	return 0;
 }
 
-
 static uint32_t pin_to_sw_bits(uint32_t pins)
 {
 	switch (pins) {
@@ -179,7 +171,6 @@ static uint32_t pin_to_sw_bits(uint32_t pins)
 	printk("No match for GPIO pin 0x%08x\n", pins);
 	return 0;
 }
-
 
 void dfu_button_pressed(struct device *gpiob, struct gpio_callback *cb,
 			uint32_t pins)
@@ -198,7 +189,6 @@ void dfu_button_pressed(struct device *gpiob, struct gpio_callback *cb,
 		printk("FOTA start failed: busy.\n");
 	}
 }
-
 
 static int dfu_button_init(void)
 {
@@ -249,7 +239,6 @@ done:
 	return 0;
 }
 
-
 void fota_dl_handler(const struct fota_download_evt *evt)
 {
 	switch (evt->id) {
@@ -265,7 +254,6 @@ void fota_dl_handler(const struct fota_download_evt *evt)
 		break;
 	}
 }
-
 
 /**@brief Configures modem to provide LTE link.
  *
@@ -297,7 +285,6 @@ static void modem_configure(void)
 #endif
 }
 
-
 static int application_init(void)
 {
 	int err;
@@ -324,7 +311,6 @@ static int application_init(void)
 
 	return 0;
 }
-
 
 void main(void)
 {
@@ -367,14 +353,13 @@ void main(void)
 
 	modem_configure();
 	
+	boot_write_img_confirmed();
+
 	err = application_init();
 	if (err != 0) {
 		return;
 	}
-
-	boot_write_img_confirmed();
 	
-	printk("Sample started.\n");
-	printk("- Press Button 1 to download nRF9160 firmware update.\n");
-	printk("- Press Button 2 to download nRF52840 firmware update.\n");
+	printk("Press Button 1 to download nRF9160 firmware update.\n");
+	printk("Press Button 2 to download nRF52840 firmware update.\n");
 }
