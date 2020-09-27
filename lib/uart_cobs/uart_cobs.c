@@ -411,8 +411,11 @@ static void uart_rx_disabled_handle(void)
 	k_work_submit_to_queue(&state.work.q, &state.work.rx_dis);
 }
 
-static void uart_async_cb(struct uart_event *evt, void *user_data)
+static void uart_async_cb(struct device *dev,
+			  struct uart_event *evt,
+			  void *user_data)
 {
+	ARG_UNUSED(dev);
 	ARG_UNUSED(user_data);
 
 	switch (evt->type) {
