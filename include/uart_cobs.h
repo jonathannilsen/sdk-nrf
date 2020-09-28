@@ -134,8 +134,12 @@ int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb);
 /**
  * @brief Set user event handler and switch to user.
  * @param user_cb Event handler.
- * @retval 0 Switched to @p user_cb synchronously.
- * @retval -EINPROGRESS Started asynchronous switch to @p user_cb .
+ * @details This function should only be called when no user is active.
+ *          An event with type @ref UART_COBS_EVT_USER_START will be generated
+ *          and sent to the given @p user_cb if the handler was successfully
+ *          set.
+ * @retval 0 Switched to user synchronously.
+ * @retval -EINPROGRESS Started asynchronous switch to user.
  * @retval -EINVAL @p user_cb was NULL. 
  * @retval -EBUSY Another user is already active (i.e. not in the idle state).
  * @retval -EALREADY @p user_cb is already active.
@@ -143,8 +147,10 @@ int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb);
 int uart_cobs_user_start(uart_cobs_cb_t user_cb);
 
 /**
- * @brief Disable 
+ * @brief Clear user event handler and switch to idle state.
  * @param user_cb Event handler.
+ * @details An event with type @ref UART_COBS_EVT_USER_END will be generated
+ *          and sent to the given @p user_cb when the user is disabled.
  * @param err Error code to be passed to event handler.
  * @retval 0 Switched to the idle state synchronously.
  * @retval -EINPROGRESS Started asynchronous switch to the idle state.
