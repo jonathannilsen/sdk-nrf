@@ -11,19 +11,19 @@
 #include <zephyr.h>
 #include <zephyr/types.h>
 
-
 /**
  * @file uart_cobs.h
- * @defgroup uart_cobs UART COBS library.
+ * @defgroup uart_cobs UART Consistent Overhead Byte Stuffing (COBS) library.
  * @{
- * @brief UART COBS library API.
+ * @brief UART Consistent Overhead Byte Stuffing (COBS) library API.
  */
 
-/*****************************************************************************
-* Structure defintions 
-*****************************************************************************/
+/** Maximum payload size for UART COBS packets */
+#define UART_COBS_MAX_PAYLOAD_LEN 252
 
-/** UART COBS event types. */
+/**
+ * @brief UART COBS event types.
+ */
 enum uart_cobs_evt_type {
 	/** UART access granted to user. */
 	UART_COBS_EVT_USER_START,
@@ -31,13 +31,15 @@ enum uart_cobs_evt_type {
 	UART_COBS_EVT_USER_END,
 	/** Received data. */
 	UART_COBS_EVT_RX,
-	/** Reception aborted by user or due to timeout or UART break. */
+	/** Reception aborted by user/timeout/UART break. */
 	UART_COBS_EVT_RX_END,
-	/** Transmission completed or aborted by user or due to timeout. */
+	/** Transmission completed or aborted by user/timeout. */
 	UART_COBS_EVT_TX_END,
 };
 
-/** UART COBS event structure. */
+/**
+ * @brief UART COBS event structure.
+ */
 struct uart_cobs_evt {
 	/** Event type. */
 	enum uart_cobs_evt_type type;
@@ -56,13 +58,10 @@ struct uart_cobs_evt {
 	} data;
 };
 
-/** UART COBS event callback signature. */
+/**
+ * @brief UART COBS event callback signature.
+ */
 typedef void (*uart_cobs_cb_t)(const struct uart_cobs_evt *const evt);
-
-
-/*****************************************************************************
-* API functions
-*****************************************************************************/
 
 /**
  * @brief Get a pointer to the UART COBS TX buffer.
@@ -164,7 +163,6 @@ int uart_cobs_user_end(uart_cobs_cb_t user_cb, int err);
  * @returns true if in the workqueue thread, false otherwise.
  */
 bool uart_cobs_in_work_q_thread(void);
-
 
 /** @} */
 

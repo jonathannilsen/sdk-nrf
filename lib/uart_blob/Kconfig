@@ -5,38 +5,55 @@
 #
 
 menu "UART BLOB transfer"
+	depends on UART_COBS
 
 config UART_BLOB
-	bool "UART BLOB transfer"
-	depends on UART_COBS
-	depends on UART_BLOB_TX || UART_BLOB_RX
+	bool
+	help
+	  Enabled whenever either the UART_BLOB_TX or UART_BLOB_RX modules are
+	  enabled.
 
 # Default config values 
 
+if UART_BLOB
+
 config UART_BLOB_DEFAULT_SEND_TIMEOUT
-	int # Default send timeout (ms)
+	int
 	default 1000
+	help
+	  Default send timeout (ms) for the UART BLOB sender/receiver.
 
 config UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
-	int # Default response timeout (ms)
+	int
 	default 10000
+	help
+	  Default receive timeout (ms) for the UART BLOB sender/receiver.
 
+endif # UART_BLOB
 
 # UART BLOB sender configuration
 
 config UART_BLOB_TX
 	bool "UART BLOB sender"
 	default n
+	select UART_BLOB
+	depends on UART_COBS
+	help
+	  Enable module for sending Binary Large OBjects (BLOBs) over UART.
 
 if UART_BLOB_TX
 
 config UART_BLOB_TX_SEND_TIMEOUT
 	int "UART BLOB sender send timeout (ms)"
 	default UART_BLOB_DEFAULT_SEND_TIMEOUT
+	help
+	  Packet send timeout in milliseconds for the UART BLOB sender.
 
 config UART_BLOB_TX_RESPONSE_TIMEOUT
 	int "UART BLOB sender response timeout (ms)"
 	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+	help
+	  Packet receive timeout in milliseconds for the UART BLOB sender.
 
 module=UART_BLOB_TX
 module-str=UART BLOB sender
@@ -50,16 +67,24 @@ endif # UART_BLOB_TX
 config UART_BLOB_RX
 	bool "UART BLOB receiver"
 	default n
+	select UART_BLOB
+	depends on UART_COBS
+	help
+	  Enable module for receiving Binary Large OBjects (BLOBs) over UART.
 
 if UART_BLOB_RX
 
 config UART_BLOB_RX_SEND_TIMEOUT
 	int "UART BLOB receiver send timeout (ms)"
 	default UART_BLOB_DEFAULT_SEND_TIMEOUT
+	help
+	  Packet send timeout in milliseconds for the UART BLOB receiver.
 
 config UART_BLOB_RX_RESPONSE_TIMEOUT
 	int "UART BLOB receiver response timeout (ms)"
 	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+	help
+	  Packet receive timeout in milliseconds for the UART BLOB receiver.
 
 module=UART_BLOB_RX
 module-str=UART BLOB receiver

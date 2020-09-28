@@ -8,6 +8,7 @@
 #define UART_BLOB_RX_H__
 
 #include <zephyr.h>
+#include <uart_blob.h>
 
 /**
  * @file uart_blob_rx.h
@@ -15,76 +16,6 @@
  * @{
  * @brief UART BLOB receiver API.
  */
-
-/*****************************************************************************
- * Structure definitions
- *****************************************************************************/
-
-/**
- * @brief UART BLOB receiver event type.
- */
-enum uart_blob_rx_evt_type {
-	/**
-	 * @brief BLOB transfer initiated by remote sender.
-	 */
-	UART_BLOB_RX_EVT_STARTED = 0,
-
-	/**
-	 * @brief BLOB transfer stopped either due to being finished or
-	 *        due to a protocol error.
-	 */
-	UART_BLOB_RX_EVT_STOPPED,
-
-	/**
-	 * @brief Number of receiver events.
-	 */
-	UART_BLOB_RX_EVT_COUNT
-};
-
-/**
- * @brief UART BLOB receiver protocol events.
- */
-enum uart_blob_rx_err {
-	/**
-	 * @brief BLOB transfer finished normally.
-	 */
-	UART_BLOB_RX_SUCCESS 		= 0,
-
-	/**
-	 * @brief BLOB transfer aborted by user.
-	 */
-	UART_BLOB_RX_ERR_ABORT		= -ECONNABORTED,
-
-	/**
-	 * @brief BLOB transfer aborted due to timeout.
-	 */
-	UART_BLOB_RX_ERR_TIMEOUT	= -ETIMEDOUT,
-
-	/**
-	 * @brief BLOB transfer aborted due to UART break error.
-	 */
-	UART_BLOB_RX_ERR_BREAK		= -ENETDOWN,
-
-	/**
-	 * @brief BLOB transfer aborted due to unhandled fatal error.
-	 */
-	UART_BLOB_RX_ERR_FATAL		= -EFAULT
-};
-
-/**
- * @brief UART BLOB receiver event structure.
- */
-struct uart_blob_rx_evt {
-	/**
-	 * @brief Type of event.
-	 */
-	enum uart_blob_rx_evt_type type;
-
-	/**
-	 * @brief Error description.
-	 */
-	enum uart_blob_rx_err err;
-};
 
 /**
  * @brief UART BLOB receiver callback structure.
@@ -128,13 +59,8 @@ struct uart_blob_rx_cb {
 	 * @brief Callback to signal UART BLOB receiver protocol event.
 	 * @param[in] evt Receiver protocol event.
 	 */
-	void (*evt_cb)(const struct uart_blob_rx_evt *const evt);
+	void (*evt_cb)(const struct uart_blob_evt *const evt);
 };
-
-
-/*****************************************************************************
- * Public API functions
- *****************************************************************************/
 
 /**
  * @brief Initialize UART BLOB receiver.

@@ -12,17 +12,12 @@
 
 #include <zephyr/types.h>
 
-
 /**
  * @file cobs.h
  * @defgroup cobs COBS encoder/decoder.
  * @{
  * @brief API for COBS encoding and decoding.
  */
-
-/*****************************************************************************
-* Macros
-*****************************************************************************/
 
 /** COBS frame delimiter value. */
 #define COBS_DELIMITER          0x00
@@ -39,10 +34,6 @@
  */
 #define COBS_ENCODED_SIZE(_sz)  ((_sz) + COBS_OVERHEAD_BYTES)
 
-
-/*****************************************************************************
-* Structure definitions
-*****************************************************************************/
 
 /** COBS in-place encoding buffer. */
 struct cobs_enc_buf {
@@ -67,10 +58,6 @@ struct cobs_dec {
 	bool in_frame;
 };
 
-
-/*****************************************************************************
-* API functions
-*****************************************************************************/
 
 /**
  * @brief COBS-encode a buffer in-place.
@@ -176,7 +163,6 @@ static inline size_t cobs_dec_current_len(struct cobs_dec *dec)
 {
 	return dec->idx;
 }
-
 
 /** @} */
 

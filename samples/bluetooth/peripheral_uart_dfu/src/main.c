@@ -75,10 +75,6 @@ static const struct bt_data ad[] = {
 };
 
 
-/*****************************************************************************
- * Static functions
- *****************************************************************************/
-
 static void identify_buf_append(const uint8_t *data, uint16_t len)
 {
 	len = MIN(len, IDENTIFY_BUF_SIZE - id_buf_len);
@@ -328,9 +324,6 @@ static int first_image_segment_in(const uint8_t *data, uint16_t len)
 	return next_image_segment_in(data, len);
 }
 
-/*****************************************************************************
- * SFTS event callbacks
- *****************************************************************************/
 
 static int on_sfts_new(struct bt_conn *conn, const uint32_t file_size)
 {
@@ -419,9 +412,6 @@ static const struct bt_gatt_stfs_cb stfs_callbacks = {
 	.abort_cb = on_sfts_abort,
 };
 
-/*****************************************************************************
- * Entry point
- *****************************************************************************/
 
 void main(void)
 {
