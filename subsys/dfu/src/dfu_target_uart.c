@@ -63,14 +63,14 @@ static void blob_tx_offset_handle(size_t offset)
 	k_poll_signal_raise(&sig_cb, 0);
 }
 
-static void blob_tx_evt_handle(const struct uart_blob_tx_evt *const evt)
+static void blob_tx_evt_handle(const struct uart_blob_evt *const evt)
 {
 	switch (evt->type) {
-	case UART_BLOB_TX_EVT_STARTED:
-		k_poll_signal_raise(&sig_start, (int) evt->err);
+	case UART_BLOB_EVT_STARTED:
+		k_poll_signal_raise(&sig_start, (int) evt->status);
 		break;
-	case UART_BLOB_TX_EVT_STOPPED:
-		k_poll_signal_raise(&sig_stop, (int) evt->err);
+	case UART_BLOB_EVT_STOPPED:
+		k_poll_signal_raise(&sig_stop, (int) evt->status);
 		break;
 	default:
 		break;

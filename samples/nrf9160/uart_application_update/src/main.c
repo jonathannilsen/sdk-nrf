@@ -22,7 +22,7 @@
 
 static struct device *		gpiob;
 static struct gpio_callback	gpio_cb;
-static atomic_t 		sw_pressed = ATOMIC_INIT(0);
+static atomic_t 		sw_pressed;
 static struct k_work		fota_work;
 
 

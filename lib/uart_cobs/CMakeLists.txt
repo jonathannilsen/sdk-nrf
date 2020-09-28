@@ -6,4 +6,3 @@
 
 zephyr_library()
 zephyr_library_sources(uart_cobs.c)
-zephyr_include_directories(.)

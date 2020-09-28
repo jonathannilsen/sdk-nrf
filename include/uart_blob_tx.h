@@ -8,80 +8,14 @@
 #define UART_BLOB_TX_H__
 
 #include <zephyr.h>
-
+#include <uart_blob.h>
 
 /**
  * @file uart_blob_tx.h
- * @defgroup uart_blob_tx UART BLOB sender.
+ * @defgroup uart_blob_tx UART Binary Large OBject (BLOB) sender.
  * @{
- * @brief UART BLOB sender API.
+ * @brief UART Binary Large OBject (BLOB) sender API.
  */
-
-
-/*****************************************************************************
- * Structure definitions
- *****************************************************************************/
-
-/**
- * @brief UART BLOB sender event type.
- */
-enum uart_blob_tx_evt_type {
-	/**
-	 * @brief BLOB transfer initiated.
-	 */
-	UART_BLOB_TX_EVT_STARTED = 0,
-
-	/**
-	 * @brief BLOB transfer stopped either due to being finished or
-	 *        due to a protocol error.
-	 */
-	UART_BLOB_TX_EVT_STOPPED,
-
-	/**
-	 * @brief Number of sender events.
-	 */
-	UART_BLOB_TX_EVT_COUNT
-};
-
-/**
- * @brief UART BLOB sender protocol events.
- */
-enum uart_blob_tx_err {
-	/**
-	 * @brief BLOB transfer closed by user.
-	 */
-	UART_BLOB_TX_SUCCESS 		= 0,
-
-	/**
-	 * @brief BLOB transfer aborted due to timeout.
-	 */
-	UART_BLOB_TX_ERR_TIMEOUT	= -ETIMEDOUT,
-
-	/**
-	 * @brief BLOB transfer aborted due to UART break error.
-	 */
-	UART_BLOB_TX_ERR_BREAK		= -ENETDOWN,
-
-	/**
-	 * @brief BLOB transfer aborted due to unhandled fatal error.
-	 */
-	UART_BLOB_TX_ERR_FATAL		= -EFAULT
-};
-
-/**
- * @brief UART BLOB sender event structure.
- */
-struct uart_blob_tx_evt {
-	/**
-	 * @brief Type of event.
-	 */
-	enum uart_blob_tx_evt_type type;
-
-	/**
-	 * @brief Error description.
-	 */
-	enum uart_blob_tx_err err;
-};
 
 /**
  * @brief UART BLOB sender callback structure.
@@ -103,13 +37,8 @@ struct uart_blob_tx_cb {
 	 * @brief Callback to signal UART BLOB sender protocol event.
 	 * @param[in] evt Client protocol event.
 	 */
-	void (*evt_cb)(const struct uart_blob_tx_evt *const evt);
+	void (*evt_cb)(const struct uart_blob_evt *const evt);
 };
-
-
-/*****************************************************************************
- * Public API functions
- *****************************************************************************/
 
 /**
  * @brief Initialize UART BLOB sender.
@@ -170,7 +99,6 @@ int uart_blob_tx_send_offset(void);
  * @retval -EBUSY If unable to start the transmission.
  */
 int uart_blob_tx_send_done(bool successful);
-
 
 /** @} */
 

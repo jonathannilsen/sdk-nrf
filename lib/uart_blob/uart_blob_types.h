@@ -16,10 +16,6 @@
  * @brief Macros and structures used for the UART BLOB protocol.
  */
 
-/*****************************************************************************
- * Macros
- *****************************************************************************/
-
 /** Opcode for INIT PDUs. */
 #define UART_BLOB_OPCODE_INIT			0x00
 /** Opcode for WRITEH PDUs. */
@@ -30,11 +26,6 @@
 #define UART_BLOB_OPCODE_OFFSET			0x03
 /** Opcode for DONE PDUs. */
 #define UART_BLOB_OPCODE_DONE			0x04
-
-
-/*****************************************************************************
- * Structure definitions
- *****************************************************************************/
 
 /** UART BLOB PDU header structure. */
 struct uart_blob_hdr {
@@ -107,7 +98,6 @@ struct uart_blob_pdu {
 	/** Arguments. */
 	union uart_blob_args args;
 } __packed;
-
 
 /** @} */
 

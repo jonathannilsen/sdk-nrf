@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
 
-#include <uart_blob_rx.h>
-#include <uart_blob_util.h>
 
 #include <zephyr.h>
 #include <logging/log.h>
 #include <sys/__assert.h>
 #include <string.h>
 
+#include <uart_blob_rx.h>
+#include "uart_blob_util.h"
 
-/*****************************************************************************
-* Structure definitions
-*****************************************************************************/
 
 struct fragment_out {
 	uint8_t *buf;
@@ -24,33 +21,16 @@ struct fragment_out {
 	size_t max_len;
 };
 
-
-/*****************************************************************************
-* Forward declarations 
-*****************************************************************************/
-
 static void cobs_user_cb(const struct uart_cobs_evt *const evt);
 
 
-/*****************************************************************************
-* Static variables
-*****************************************************************************/
-
-static bool done_pending		= false;
-static int rx_state			= OPCODE_NONE;
-static struct fragment_out fragment 	= {0};
-static struct uart_blob_rx_cb app_cb 	= {NULL};
+static bool done_pending;
+static int rx_state = OPCODE_NONE;
+static struct fragment_out fragment;
+static struct uart_blob_rx_cb app_cb;
 
 LOG_MODULE_REGISTER(uart_blob_rx, CONFIG_UART_BLOB_RX_LOG_LEVEL);
 
-
-/*****************************************************************************
-* Static functions
-*****************************************************************************/
-
-/*
- * General helper functions
- *****************************************************************************/
 
 static int fragment_prepare(size_t len)
 {
@@ -92,24 +72,24 @@ static int fragment_write(const uint8_t *data, size_t len)
 	}
 }
 
-static enum uart_blob_rx_err err_type_get(int err)
+static enum uart_blob_status status_type_get(int err)
 {
 	switch (err) {
-	case UART_BLOB_RX_SUCCESS:
-	case UART_BLOB_RX_ERR_ABORT:
-	case UART_BLOB_RX_ERR_TIMEOUT:
-	case UART_BLOB_RX_ERR_BREAK:
-		return (enum uart_blob_rx_err) err;
+	case UART_BLOB_SUCCESS:
+	case UART_BLOB_ERR_ABORT:
+	case UART_BLOB_ERR_TIMEOUT:
+	case UART_BLOB_ERR_BREAK:
+		return (enum uart_blob_status) err;
 	default:
-		return UART_BLOB_RX_ERR_FATAL;
+		return UART_BLOB_ERR_FATAL;
 	}
 }
 
-static void evt_send(enum uart_blob_rx_evt_type type, enum uart_blob_rx_err err)
+static void evt_send(enum uart_blob_evt_type type, enum uart_blob_status err)
 {
-	struct uart_blob_rx_evt evt = {
+	struct uart_blob_evt evt = {
 		.type = type,
-		.err = err
+		.status = err
 	};
 	app_cb.evt_cb(&evt);
 }
@@ -140,11 +120,6 @@ static uint32_t rx_size_get(void)
 		return sizeof(struct uart_blob_pdu);
 	}
 }
-
-
-/*
- * UART COBS handler functions
- *****************************************************************************/
 
 static int init_recv_handle(const struct uart_blob_pdu *pdu,
 				size_t len,
@@ -315,8 +290,7 @@ static void recv_handle(const uint8_t *buf, size_t len)
 static void send_handle(void)
 {
 	if (done_pending) {
-		(void) uart_cobs_user_end(cobs_user_cb,
-					  UART_BLOB_RX_SUCCESS);
+		(void) uart_cobs_user_end(cobs_user_cb, UART_BLOB_SUCCESS);
 	} else {
 		(void) uart_cobs_rx_timeout_start(
 			CONFIG_UART_BLOB_RX_RESPONSE_TIMEOUT);
@@ -325,18 +299,18 @@ static void send_handle(void)
 
 static void recv_abort_handle(int err)
 {
-	(void) uart_cobs_user_end(cobs_user_cb, err_type_get(err));
+	(void) uart_cobs_user_end(cobs_user_cb, status_type_get(err));
 }
 
 static void send_abort_handle(int err)
 {
-	(void) uart_cobs_user_end(cobs_user_cb, err_type_get(err));
+	(void) uart_cobs_user_end(cobs_user_cb, status_type_get(err));
 }
 
 static void user_start_handle(void)
 {
 	done_pending = false;
-	evt_send(UART_BLOB_RX_EVT_STARTED, UART_BLOB_RX_SUCCESS);
+	evt_send(UART_BLOB_EVT_STARTED, UART_BLOB_SUCCESS);
 }
 
 static void user_end_handle(int err)
@@ -347,7 +321,7 @@ static void user_end_handle(int err)
 	} else {
 		rx_state = OPCODE_NONE;
 	}
-	evt_send(UART_BLOB_RX_EVT_STOPPED, err_type_get(err));
+	evt_send(UART_BLOB_EVT_STOPPED, status_type_get(err));
 }
 
 static void cobs_user_cb(const struct uart_cobs_evt *const evt)
@@ -398,11 +372,6 @@ static void cobs_idle_cb(const struct uart_cobs_evt *const evt)
 	}
 }
 
-
-/*****************************************************************************
-* Public API functions
-*****************************************************************************/
-
 int uart_blob_rx_init(uint8_t *fragment_buf,
 		      size_t fragment_max_len,
 		      struct uart_blob_rx_cb *callbacks)
@@ -441,7 +410,7 @@ void uart_blob_rx_enable(void)
 
 int uart_blob_rx_disable(void)
 {
-	int err = uart_cobs_user_end(cobs_user_cb, UART_BLOB_RX_ERR_ABORT);
+	int err = uart_cobs_user_end(cobs_user_cb, UART_BLOB_ERR_ABORT);
 	if (err == -EBUSY) {
 		rx_state = OPCODE_NONE;
 		return 0;

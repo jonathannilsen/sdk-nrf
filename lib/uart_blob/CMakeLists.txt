@@ -7,4 +7,3 @@
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_UART_BLOB_TX uart_blob_tx.c)
 zephyr_library_sources_ifdef(CONFIG_UART_BLOB_RX uart_blob_rx.c)
-zephyr_include_directories(.)

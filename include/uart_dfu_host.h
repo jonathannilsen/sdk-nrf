@@ -14,10 +14,6 @@
  * @brief UART DFU host API.
  */
 
-/*****************************************************************************
- * API functions
- *****************************************************************************/
-
 /**
  * @brief Initialize the UART DFU host.
  */
@@ -32,7 +28,6 @@ void uart_dfu_host_enable(void);
  * @brief Disable the UART DFU host, aborting any ongoing firmware upgrades.
  */
 void uart_dfu_host_disable(void);
-
 
 /** @} */
 

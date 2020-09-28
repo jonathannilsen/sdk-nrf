@@ -12,22 +12,14 @@
 #include <uart_dfu_host.h>
 
 
-/*****************************************************************************
-* Static variables
-*****************************************************************************/
-
-static bool initialized			= false;
-static size_t total_len			= 0;
+static bool initialized;
+static size_t total_len;
 static uint8_t fragment[CONFIG_UART_DFU_HOST_MAX_FRAGMENT_SIZE];
 
-static struct k_poll_signal sig_stop	= K_POLL_SIGNAL_INITIALIZER(sig_stop);
+static struct k_poll_signal sig_stop = K_POLL_SIGNAL_INITIALIZER(sig_stop);
 
 LOG_MODULE_REGISTER(uart_dfu_host, CONFIG_UART_DFU_HOST_LOG_LEVEL);
 
-
-/*****************************************************************************
-* Static functions
-*****************************************************************************/
 
 static void state_reset(void)
 {
@@ -117,20 +109,20 @@ static int blob_done_handle(bool successful)
 	return err;
 }
 
-static void blob_evt_handle(const struct uart_blob_rx_evt *const evt)
+static void blob_evt_handle(const struct uart_blob_evt *const evt)
 {
 	switch (evt->type) {
-	case UART_BLOB_RX_EVT_STARTED:
+	case UART_BLOB_EVT_STARTED:
 		k_poll_signal_reset(&sig_stop);
 		break;
-	case UART_BLOB_RX_EVT_STOPPED:
+	case UART_BLOB_EVT_STOPPED:
 		if (initialized) {
 			(void) dfu_target_reset();
 			state_reset();
 		} else if (total_len != 0) {
 			state_reset();
 		}
-		k_poll_signal_raise(&sig_stop, evt->err);
+		k_poll_signal_raise(&sig_stop, evt->status);
 		break;
 	default:
 		break;
@@ -146,9 +138,6 @@ static void blob_rx_stop_wait(void)
 	k_poll_signal_reset(&sig_stop);
 }
 
-/*****************************************************************************
-* API functions
-*****************************************************************************/
 
 void uart_dfu_host_init(void)
 {

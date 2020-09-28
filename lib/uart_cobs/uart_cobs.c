@@ -11,12 +11,7 @@
 #include <drivers/uart.h>
 
 #include <uart_cobs.h>
-#include <cobs.h>
-
-
-/*****************************************************************************
-* Macros
-*****************************************************************************/
+#include "cobs.h"
 
 /* Devicetree node for the chosen UART controller. */
 #define UART_COBS_DT	 DT_CHOSEN(nordic_cobs_uart_controller)
@@ -35,16 +30,8 @@ BUILD_ASSERT(DT_PROP(UART_COBS_DT, hw_flow_control),
 LOG_MODULE_REGISTER(uart_cobs, CONFIG_UART_COBS_LOG_LEVEL);
 
 
-/*****************************************************************************
-* Forward declarations
-*****************************************************************************/
-
 static void sw_evt_handle(const struct uart_cobs_evt *const evt);
 
-
-/*****************************************************************************
-* Static variables
-*****************************************************************************/
 
 enum op_status {
 	STATUS_OFF	= 0,
@@ -89,10 +76,6 @@ struct {
 K_THREAD_STACK_DEFINE(work_q_stack_area,
 		      CONFIG_UART_COBS_THREAD_STACK_SIZE);
 
-
-/*****************************************************************************
-* Static functions
-*****************************************************************************/
 
 static bool status_error_set(atomic_t *status, int err)
 {
@@ -304,10 +287,6 @@ static void rx_process(void)
 	}
 }
 
-/*
- * Workqueue handlers
- ****************************************************************************/
-
 static void rx_dis_process(struct k_work *work)
 {
 	ARG_UNUSED(work);
@@ -347,10 +326,6 @@ static void tx_dis_process(struct k_work *work)
 	}
 }
 
-/*
- * Timer event handlers
- ****************************************************************************/
-
 static void rx_timer_expired(struct k_timer *timer)
 {
 	ARG_UNUSED(timer);
@@ -359,10 +334,6 @@ static void rx_timer_expired(struct k_timer *timer)
 		(void) uart_rx_disable(state.dev);
 	}
 }
-
-/*
- * UART event handlers
- ****************************************************************************/
 
 static void uart_tx_handle(struct uart_event_tx *evt, bool aborted)
 {
@@ -445,10 +416,6 @@ static void uart_async_cb(struct device *dev,
 		break;
 	}
 }
-
-/*****************************************************************************
-* API functions
-*****************************************************************************/
 
 static int uart_cobs_sys_init(struct device *dev)
 {
@@ -620,9 +587,5 @@ bool uart_cobs_in_work_q_thread(void)
 {
 	return k_current_get() == &state.work.q.thread;
 }
-
-/*****************************************************************************
-* System initialization hooks
-*****************************************************************************/
 
 SYS_INIT(uart_cobs_sys_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

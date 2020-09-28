@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
 
-#include <uart_blob_tx.h>
-#include <uart_blob_util.h>
 
 #include <zephyr.h>
 #include <logging/log.h>
 #include <sys/__assert.h>
 #include <string.h>
 
+#include <uart_blob_tx.h>
+#include "uart_blob_util.h"
 
-/*****************************************************************************
-* Structure definitions
-*****************************************************************************/
 
 struct fragment_in {
 	atomic_ptr_t buf;
@@ -23,34 +20,17 @@ struct fragment_in {
 	size_t len;
 };
 
-
-/*****************************************************************************
-* Forward declarations 
-*****************************************************************************/
-
 static void cobs_user_cb(const struct uart_cobs_evt *const evt);
 
 
-/*****************************************************************************
-* Static variables
-*****************************************************************************/
-
-static atomic_t api_avail		= ATOMIC_INIT(0);
-static bool in_write			= false;
-static int rx_opcode			= OPCODE_NONE;
-static struct fragment_in fragment 	= {0};
-static struct uart_blob_tx_cb app_cb 	= {NULL};
+static atomic_t api_avail;
+static bool in_write;
+static int rx_opcode = OPCODE_NONE;
+static struct fragment_in fragment;
+static struct uart_blob_tx_cb app_cb;
 
 LOG_MODULE_REGISTER(uart_blob_tx, CONFIG_UART_BLOB_TX_LOG_LEVEL);
 
-
-/*****************************************************************************
-* Static functions
-*****************************************************************************/
-
-/*
- * General helper functions
- *****************************************************************************/
 
 static void fragment_init(const uint8_t *buf, size_t len)
 {
@@ -89,23 +69,23 @@ static void state_reset(void)
 	fragment_init(NULL, 0);
 }
 
-static enum uart_blob_tx_err err_type_get(int err)
+static enum uart_blob_status status_type_get(int err)
 {
 	switch (err) {
-	case UART_BLOB_TX_SUCCESS:
-	case UART_BLOB_TX_ERR_TIMEOUT:
-	case UART_BLOB_TX_ERR_BREAK:
-		return (enum uart_blob_tx_err) err;
+	case UART_BLOB_SUCCESS:
+	case UART_BLOB_ERR_TIMEOUT:
+	case UART_BLOB_ERR_BREAK:
+		return (enum uart_blob_status) err;
 	default:
-		return UART_BLOB_TX_ERR_FATAL;
+		return UART_BLOB_ERR_FATAL;
 	}
 }
 
-static void evt_send(enum uart_blob_tx_evt_type type, enum uart_blob_tx_err err)
+static void evt_send(enum uart_blob_evt_type type, enum uart_blob_status err)
 {
-	struct uart_blob_tx_evt evt = {
+	struct uart_blob_evt evt = {
 		.type = type,
-		.err = err
+		.status = err
 	};
 	app_cb.evt_cb(&evt);
 }
@@ -160,11 +140,6 @@ static bool write_seq_cont(void)
 	}
 	return true;
 }
-
-
-/*
- * UART COBS handler functions
- *****************************************************************************/
 
 static void status_recv_handle(const struct uart_blob_pdu *pdu)
 {
@@ -242,8 +217,7 @@ static void send_handle(void)
 		}
 	}
 
-	(void) uart_cobs_rx_timeout_start(
-		CONFIG_UART_BLOB_TX_RESPONSE_TIMEOUT);
+	(void) uart_cobs_rx_timeout_start(CONFIG_UART_BLOB_TX_RESPONSE_TIMEOUT);
 }
 
 static void recv_abort_handle(int err)
@@ -260,14 +234,14 @@ static void user_start_handle(void)
 {
 	state_reset();	
 	(void) atomic_set(&api_avail, 1);
-	evt_send(UART_BLOB_TX_EVT_STARTED, UART_BLOB_TX_SUCCESS);
+	evt_send(UART_BLOB_EVT_STARTED, UART_BLOB_SUCCESS);
 }
 
 static void user_end_handle(int err)
 {
 	(void) atomic_set(&api_avail, 0);
 	state_reset();
-	evt_send(UART_BLOB_TX_EVT_STOPPED, err_type_get(err));
+	evt_send(UART_BLOB_EVT_STOPPED, status_type_get(err));
 }
 
 static void cobs_user_cb(const struct uart_cobs_evt *const evt)
@@ -297,11 +271,6 @@ static void cobs_user_cb(const struct uart_cobs_evt *const evt)
 	}
 }
 
-
-/*
- * API helper functions
- *****************************************************************************/
-
 static int api_send(struct uart_blob_pdu *pdu, size_t len)
 {
 	if (!atomic_cas(&api_avail, 1, 0)) {
@@ -327,11 +296,6 @@ static int api_send(struct uart_blob_pdu *pdu, size_t len)
 		return 0;
 	}
 }
-
-
-/*****************************************************************************
-* API functions
-*****************************************************************************/
 
 int uart_blob_tx_init(struct uart_blob_tx_cb *callbacks)
 {
@@ -359,7 +323,7 @@ int uart_blob_tx_enable(void)
 
 int uart_blob_tx_disable(void)
 {
-	return uart_cobs_user_end(cobs_user_cb, UART_BLOB_TX_SUCCESS);
+	return uart_cobs_user_end(cobs_user_cb, UART_BLOB_SUCCESS);
 }
 
 int uart_blob_tx_send_init(size_t blob_len)
