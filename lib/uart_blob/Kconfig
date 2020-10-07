@@ -13,29 +13,11 @@ config UART_BLOB
 	  Enabled whenever either the UART_BLOB_TX or UART_BLOB_RX modules are
 	  enabled.
 
-# Default config values 
-
-if UART_BLOB
-
-config UART_BLOB_DEFAULT_SEND_TIMEOUT
-	int
-	default 1000
-	help
-	  Default send timeout (ms) for the UART BLOB sender/receiver.
-
-config UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
-	int
-	default 10000
-	help
-	  Default receive timeout (ms) for the UART BLOB sender/receiver.
-
-endif # UART_BLOB
 
 # UART BLOB sender configuration
 
 config UART_BLOB_TX
 	bool "UART BLOB sender"
-	default n
 	select UART_BLOB
 	depends on UART_COBS
 	help
@@ -45,13 +27,13 @@ if UART_BLOB_TX
 
 config UART_BLOB_TX_SEND_TIMEOUT
 	int "UART BLOB sender send timeout (ms)"
-	default UART_BLOB_DEFAULT_SEND_TIMEOUT
+	default 1000
 	help
 	  Packet send timeout in milliseconds for the UART BLOB sender.
 
 config UART_BLOB_TX_RESPONSE_TIMEOUT
 	int "UART BLOB sender response timeout (ms)"
-	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+	default 10000
 	help
 	  Packet receive timeout in milliseconds for the UART BLOB sender.
 
@@ -66,7 +48,6 @@ endif # UART_BLOB_TX
 
 config UART_BLOB_RX
 	bool "UART BLOB receiver"
-	default n
 	select UART_BLOB
 	depends on UART_COBS
 	help
@@ -76,13 +57,13 @@ if UART_BLOB_RX
 
 config UART_BLOB_RX_SEND_TIMEOUT
 	int "UART BLOB receiver send timeout (ms)"
-	default UART_BLOB_DEFAULT_SEND_TIMEOUT
+	default 1000
 	help
 	  Packet send timeout in milliseconds for the UART BLOB receiver.
 
 config UART_BLOB_RX_RESPONSE_TIMEOUT
 	int "UART BLOB receiver response timeout (ms)"
-	default UART_BLOB_DEFAULT_RESPONSE_TIMEOUT
+	default 10000
 	help
 	  Packet receive timeout in milliseconds for the UART BLOB receiver.
 
