@@ -19,7 +19,7 @@
  */
 
 /** Maximum payload size for UART COBS packets */
-#define UART_COBS_MAX_PAYLOAD_LEN 252
+#define UART_COBS_MAX_PAYLOAD_LEN 253
 
 /**
  * @brief UART COBS event types.
