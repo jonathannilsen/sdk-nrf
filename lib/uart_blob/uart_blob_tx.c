@@ -161,6 +161,7 @@ static void writeh_recv_handle(const struct uart_blob_pdu *pdu)
 
 static void offset_recv_handle(const struct uart_blob_pdu *pdu)
 {
+	/* FIXME: don't call two separate functions? */
 	(void) atomic_set(&api_avail, 1);
 	if (pdu->args.status.data.status < 0) {
 		app_cb.status_cb(pdu->args.status.data.status);

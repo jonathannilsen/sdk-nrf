@@ -27,13 +27,17 @@
 #include <uart_cobs.h>
 #include "cobs.h"
 
-#define EVT_SEND	 ((uart_cobs_cb_t) atomic_ptr_get(&state.user.current))
+/* Compile-time check that max payload size is set correctly. */
+BUILD_ASSERT(UART_COBS_MAX_PAYLOAD_LEN == COBS_MAX_DATA_BYTES,
+	     "Max payload size should be equal to max COBS size.");
+
 #define LOG_DBG_DEV(...) LOG_DBG(DT_LABEL(UART_COBS_DT) ": " __VA_ARGS__)
 
 LOG_MODULE_REGISTER(uart_cobs, CONFIG_UART_COBS_LOG_LEVEL);
 
 
-static void sw_evt_handle(const struct uart_cobs_evt *const evt);
+static void sw_evt_handle(const struct uart_cobs_evt *const evt, void *ctx);
+static void no_evt_handle(const struct uart_cobs_evt *const evt, void *ctx);
 
 
 enum op_status {
@@ -46,6 +50,7 @@ struct {
 	struct {
 		atomic_t status;
 		struct cobs_enc_buf buf;
+		size_t len;
 	} tx;
 	struct {
 		atomic_t status;
@@ -62,10 +67,10 @@ struct {
 	} rx;
 	struct {
 		atomic_ptr_t current;
-		uart_cobs_cb_t idle;
+		struct uart_cobs_user *idle;
 		struct {
-			uart_cobs_cb_t from;
-			uart_cobs_cb_t to;
+			struct uart_cobs_user *from;
+			struct uart_cobs_user *to;
 			int err;
 		} pending;
 	} user;
@@ -78,6 +83,9 @@ struct {
 
 K_THREAD_STACK_DEFINE(work_q_stack_area,
 		      CONFIG_UART_COBS_THREAD_STACK_SIZE);
+
+UART_COBS_USER_DEFINE(sw_user, sw_evt_handle, NULL);
+UART_COBS_USER_DEFINE(no_user, no_evt_handle, NULL);
 
 
 static bool status_error_set(atomic_t *status, int err)
@@ -95,28 +103,35 @@ static inline bool tx_error_set(int err)
 	return status_error_set(&state.tx.status, err);
 }
 
+static inline void evt_send(const struct uart_cobs_evt *const evt)
+{
+	struct uart_cobs_user *user;
+	user = (struct uart_cobs_user *) atomic_ptr_get(&state.user.current);
+	user->cb(evt, user->ctx);
+}
+
 static void send_evt_end(enum uart_cobs_evt_type type, int err)
 {
 	struct uart_cobs_evt evt;
 	evt.type = type;
 	evt.data.err = err;
-	EVT_SEND(&evt);
+	evt_send(&evt);
 }
 
 static void user_start(void)
 {
 	struct uart_cobs_evt evt;
 	evt.type = UART_COBS_EVT_USER_START;
-	EVT_SEND(&evt);
+	evt_send(&evt);
 }
 
-static void user_end(uart_cobs_cb_t from, int err)
+static void user_end(struct uart_cobs_user *from, int err)
 {
 	if (from != NULL) {
 		struct uart_cobs_evt evt;
 		evt.type = UART_COBS_EVT_USER_END;
 		evt.data.err = err;
-		from(&evt);
+		from->cb(&evt, from->ctx);
 	}
 }
 
@@ -128,10 +143,10 @@ static bool user_sw_ready(void)
 	switch (atomic_get(&state.rx.status)) {
 	case STATUS_OFF:
 		state.rx.processing = false;
-		uart_cobs_rx_timeout_stop();
+		uart_cobs_rx_timeout_stop(&state.user.current);
 		break;
 	case STATUS_ON:
-		(void) uart_cobs_rx_stop();
+		(void) uart_cobs_rx_stop(&state.user.current);
 		ready = false;
 		break;
 	default:
@@ -145,7 +160,7 @@ static bool user_sw_ready(void)
 	case STATUS_OFF:
 		break;
 	case STATUS_ON:
-		(void) uart_cobs_tx_stop();
+		(void) uart_cobs_tx_stop(&state.user.current);
 		ready = false;
 		break;
 	default:
@@ -157,6 +172,7 @@ static bool user_sw_ready(void)
 	return ready;
 }
 
+/* TODO: set TX len to 0 */
 static void user_sw_finish(void)
 {
 	LOG_DBG_DEV("User end: %lu",
@@ -172,14 +188,15 @@ static void user_sw_finish(void)
 	user_start();
 }
 
-static int user_sw_prepare(uart_cobs_cb_t from, uart_cobs_cb_t to, int err)
+static int user_sw_prepare(struct uart_cobs_user *from,
+			   struct uart_cobs_user *to, int err)
 {
 	/* Switch between sessions by passing through a temporary "SW" session
 	 * where RX/TX can be stopped and residual events can be safely caught
 	 * without interfering with normal sessions.
 	 */
 
-	if (!atomic_ptr_cas(&state.user.current, from, sw_evt_handle)) {
+	if (!atomic_ptr_cas(&state.user.current, from, &sw_user)) {
 		return -EBUSY;
 	}
 
@@ -196,6 +213,7 @@ static int user_sw_prepare(uart_cobs_cb_t from, uart_cobs_cb_t to, int err)
 		return 0;
 	} else {
 		/* Finish asynchronously (via sw_evt_handle()). */
+		/* FIXME: is it necessary to return an error code? */
 		return -EINPROGRESS;
 	}
 }
@@ -264,7 +282,7 @@ static void rx_process(void)
 		}
 		LOG_DBG_DEV("RX PDU event");
 		evt.data.rx.len = ret;
-		EVT_SEND(&evt);
+		evt_send(&evt);
 
 		if (!state.rx.processing) {
 			/* Processing was aborted due to session switch. */
@@ -302,9 +320,9 @@ static void rx_dis_process(struct k_work *work)
 		}
 	} else if (status == -EAGAIN) {
 		/* Malformed data. Reset and resume reception. */
+		(void) atomic_set(&state.rx.status, STATUS_ON);
 		state.rx.processing = false;
 		cobs_dec_reset(&state.rx.decoder);
-		(void) atomic_set(&state.rx.status, STATUS_ON);
 		rx_resume();
 	} else {
 		/* Fatal error. */
@@ -445,7 +463,7 @@ static int uart_cobs_sys_init(struct device *dev)
 
 	cobs_dec_init(&state.rx.decoder, state.rx.decoded_buf);
 
-	state.user.idle = no_evt_handle;
+	state.user.idle = &no_user;
 	(void) atomic_ptr_set(&state.user.current, state.user.idle);
 
 	k_work_init(&state.work.rx_dis, rx_dis_process);
@@ -459,31 +477,117 @@ static int uart_cobs_sys_init(struct device *dev)
 
 int uart_cobs_init(void)
 {
-	return uart_cobs_sys_init(NULL);
+	if (state.dev == NULL) {
+		return uart_cobs_sys_init(NULL);
+	} else {
+		/* Already initialized. */
+		return 0;
+	}
 }
 
-uint8_t *uart_cobs_tx_buf_get(void)
+int uart_cobs_user_start(struct uart_cobs_user *user)
 {
-	return state.tx.buf.buf;
+	if (user == NULL) {
+		return -EINVAL;
+	}
+	if (atomic_ptr_get(&state.user.current) == user) {
+		return -EALREADY;
+	} else {
+		return user_sw_prepare(state.user.idle, user, 0);
+	}
 }
 
-int uart_cobs_tx_start(size_t len, int timeout)
+int uart_cobs_user_end(struct uart_cobs_user *user, int err)
 {
-	int err;
+	if (user == NULL) {
+		return -EINVAL;
+	}
+	return user_sw_prepare(user, state.user.idle, err);
+}
 
+bool uart_cobs_user_active(struct uart_cobs_user *user)
+{
+	return atomic_get(&state.user.current) == user;
+}
+
+int uart_cobs_default_user_set(struct uart_cobs_user *user)
+{
+	if (user == NULL) {
+		/* Switch to the unset idle state if NULL is passed */
+		user = &no_user;
+	}
+
+	/* Switch to empty idle handler first to lock the user state,
+	   preventing other switches from messing up the state. */
+	if (!atomic_ptr_cas(&state.user.current, state.user.idle, &no_user)) {
+		return -EBUSY;
+	}
+	
+	struct uart_cobs_user *prev_user = state.user.idle;
+	state.user.idle = user;
+	if (prev_user == user) {
+		return -EALREADY;
+	}
+
+	(void) user_sw_prepare(prev_user, user, 0);
+	return 0;
+}
+
+int uart_cobs_tx_buf_write(struct uart_cobs_user *user,
+			   uint8_t *data, size_t len)
+{
+	if (data == NULL) {
+		return -EINVAL;
+	}
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
+
+	size_t new_len = state.tx.len + len;
+	if (new_len > COBS_MAX_DATA_BYTES) {
+		return -ENOMEM;
+	}
+
+	if (atomic_get(&state.tx.status) != STATUS_OFF) {
+		return -EBUSY;
+	}
+
+	memcpy(&state.tx.buf.buf[state.tx.len], data, len);
+	state.tx.len = new_len;
+	return 0;
+}
+
+int uart_cobs_tx_buf_clear(struct uart_cobs_user *user)
+{
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
+	if (atomic_get(&state.tx.status) != STATUS_OFF) {
+		return -EBUSY;
+	}
+
+	state.tx.len = 0;
+	return 0;
+}
+
+int uart_cobs_tx_start(struct uart_cobs_user *user, int timeout)
+{
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
 	if (!atomic_cas(&state.tx.status, STATUS_OFF, STATUS_ON)) {
 		LOG_DBG_DEV("TX was already started");
 		return -EBUSY;
 	}
 
-	err = cobs_encode(&state.tx.buf, len);
+	int err = cobs_encode(&state.tx.buf, state.tx.len);
 	if (err) {
 		(void) atomic_set(&state.tx.status, STATUS_OFF);
 		return err;
 	}
 
 	err = uart_tx(state.dev, (uint8_t *) &state.tx.buf,
-		      COBS_ENCODED_SIZE(len), timeout);
+		      COBS_ENCODED_SIZE(state.tx.len), timeout);
 	if (err) {
 		LOG_DBG_DEV("TX failed to start (drv err %d)", err);
 		(void) atomic_set(&state.tx.status, STATUS_OFF);
@@ -492,16 +596,27 @@ int uart_cobs_tx_start(size_t len, int timeout)
 	return 0;
 }
 
-int uart_cobs_tx_stop(void)
+int uart_cobs_tx_stop(struct uart_cobs_user *user)
 {
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
 	if (tx_error_set(-ECONNABORTED)) {
 		return uart_tx_abort(state.dev);
+	} else {
+		/* Already aborted or aborting. */
+		return 0;
 	}
-	return 0;
 }
 
-int uart_cobs_rx_start(size_t len)
+int uart_cobs_rx_start(struct uart_cobs_user *user, size_t len)
 {
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
+	if (len == 0 || len > COBS_MAX_DATA_BYTES) {
+		return -EINVAL;
+	}
 	if (!atomic_cas(&state.rx.status, STATUS_OFF, STATUS_ON)) {
 		LOG_DBG_DEV("RX was already started");
 		return -EBUSY;
@@ -516,6 +631,7 @@ int uart_cobs_rx_start(size_t len)
 	} else if (uart_cobs_in_work_q_thread()) {
 		/* RX will start after buffer processing finishes. */
 	} else {
+		/* TODO: resolve issue where higher prio thread enters here. */
 		LOG_DBG_DEV("RX failed to start (processing)");
 		(void) atomic_set(&state.rx.status, STATUS_OFF);
 		return -EBUSY;
@@ -525,65 +641,35 @@ int uart_cobs_rx_start(size_t len)
 	return 0;
 }
 
-int uart_cobs_rx_stop(void)
+int uart_cobs_rx_stop(struct uart_cobs_user *user)
 {
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
 	if (rx_error_set(-ECONNABORTED)) {
 		return uart_rx_disable(state.dev);
-	}
-	return 0;
-}
-
-void uart_cobs_rx_timeout_start(int timeout)
-{
-	k_timer_start(&state.rx.timer, K_MSEC(timeout), K_NO_WAIT);
-}
-
-void uart_cobs_rx_timeout_stop(void)
-{
-	k_timer_stop(&state.rx.timer);
-}
-
-int uart_cobs_idle_user_set(uart_cobs_cb_t idle_cb)
-{
-	if (idle_cb == NULL) {
-		/* Switch to the unset idle state if NULL is passed */
-		idle_cb = no_evt_handle;
-	}
-
-	/* Switch to empty idle handler first to lock the user state,
-	   preventing other switches from messing up the state. */
-	if (!atomic_ptr_cas(&state.user.current, state.user.idle, no_evt_handle)) {
-		return -EBUSY;
-	}
-	
-	uart_cobs_cb_t prev_cb = state.user.idle;
-	state.user.idle = idle_cb;
-	if (prev_cb == idle_cb) {
-		return -EALREADY;
-	}
-
-	(void) user_sw_prepare(prev_cb, idle_cb, 0);
-	return 0;
-}
-
-int uart_cobs_user_start(uart_cobs_cb_t user_cb)
-{
-	if (user_cb == NULL) {
-		return -EINVAL;
-	}
-	if (atomic_ptr_get(&state.user.current) == user_cb) {
-		return -EALREADY;
 	} else {
-		return user_sw_prepare(state.user.idle, user_cb, 0);
+		/* Already aborted or aborting. */
+		return 0;
 	}
 }
 
-int uart_cobs_user_end(uart_cobs_cb_t user_cb, int err)
+int uart_cobs_rx_timeout_start(struct uart_cobs_user *user, int timeout)
 {
-	if (user_cb == NULL) {
-		return -EINVAL;
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
 	}
-	return user_sw_prepare(user_cb, state.user.idle, err);
+	k_timer_start(&state.rx.timer, K_MSEC(timeout), K_NO_WAIT);
+	return 0;
+}
+
+int uart_cobs_rx_timeout_stop(struct uart_cobs_user *user)
+{
+	if (atomic_get(&state.user.current) != user) {
+		return -EACCES;
+	}
+	k_timer_stop(&state.rx.timer);
+	return 0;
 }
 
 bool uart_cobs_in_work_q_thread(void)

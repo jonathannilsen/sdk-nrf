@@ -22,16 +22,30 @@
  */
 struct uart_blob_tx_cb {
 	/**
-	 * @brief Callback to signal received status from the remote receiver.
-	 * @param[in] status Status code returned by the remote receiver.
+	 * @brief Signal receiver response to @ref uart_blob_tx_send_init.
+	 * @param[in] status Status code returned by the receiver.
 	 */
-	void (*status_cb)(int status);
+	void (*init_cb)(int status);
 
 	/**
-	 * @brief Callback to signal received offset from the remote receiver.
-	 * @param[in] offset Offset returned by the remote receiver.
+	 * @brief Signal receiver response to @ref uart_blob_tx_send_offset.
+	 * @param[in] status Status code returned by the receiver.
+	 * @param[in] offset Offset returned by the receiver.
+	 * 		     Only valid if @p status is 0.
 	 */
-	void (*offset_cb)(size_t offset);
+	void (*offset_cb)(int status, size_t offset);
+
+	/**
+	 * @brief Signal receiver response to @ref uart_blob_tx_send_write.
+	 * @param[in] status Status code returned by the receiver.
+	 */
+	void (*write_cb)(int status);
+
+	/**
+	 * @brief Signal receiver response to @ref uart_blob_tx_send_done.
+	 * @param[in] status Status code returned by the remote receiver.
+	 */
+	void (*done_cb)(int status);
 
 	/**
 	 * @brief Callback to signal UART BLOB sender protocol event.

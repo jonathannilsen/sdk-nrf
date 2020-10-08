@@ -24,6 +24,7 @@ config UART_COBS_THREAD_PRIO
 	help
 	  Thread priority for the workqueue used by the UART COBS library
 	  for processing UART events and dispatching application events.
+	  
 
 config UART_COBS_THREAD_STACK_SIZE
 	int "UART COBS library workqueue thread stack size"

@@ -1,0 +1,175 @@
+.. _doc_uart_cobs:
+
+UART Consistent Overhead Byte Stuffing (COBS) library
+#####################################################
+
+The UART COBS library provides an API for sending and receiving
+Consistent Overhead Byte Stuffing (COBS) encoded frames over a UART
+instance. The library also provides a mechanism for coordinating
+access to the UART between multiple users.
+
+
+Consistent Overhead Byte Stuffing
+*********************************
+
+Consistent Overhead Byte Stuffing (COBS) is a byte encoding that enables packet framing with a small and predictable overhead.
+COBS encodes the data in the following way, illustrated using an example.
+
++----------------+
+| Data (hex)     |
++----------------+
+| 00 22 33 00 44 |
++----------------+
+
+Given the unencoded data above, the following steps are performed.
+An overhead byte *O* with value ``0x00`` is inserted before the packet data.
+The delimiter byte *D* with value ``0x00`` is inserted after the packet data.
+
++----+----------------+----+
+| O  | Data (hex)     | D  |
++----+----------------+----+
+| 00 | 00 11 22 00 33 | 00 |
++----+----------------+----+
+
+For each byte, including *O* but not including *D*:
+* If the byte is equal to ``0x00``, it is instead set to the relative offset to the next ``0x00`` byte in the data.
+* Otherwise, the byte is left unchanged.
+
+In this example, *O* points to the first data byte (offset 1), which points to the fourth data byte (offset 3), which finally points to the delimiter (offset 2).
+
++----+----------------+----+
+| O  | Data (hex)     | D  |
++----+----------------+----+
+| 01 | 03 11 22 02 33 | 00 |
++----+----------------+----+
+
+This COBS encoding is unambiguous and has a constant 2 byte overhead.
+The implementation supports up to 253 data bytes per frame.
+
+COBS decoding works by reversing the above process.
+It starts at the first received byte (i.e. the overhead byte *O*) and uses the relative offsets to revert each escaped byte back to ``0x00``.
+
+
+User concept
+************
+
+To use the API one must first define a :cpp:struct:`uart_cobs_user` containing a pointer to an event handler function and an optional context pointer.
+This structure functions as an API user identifier and must be passed to all the API functions.
+Before using the API one must call :cpp:func:`uart_cobs_user_start` to claim access to the UART.
+An event with type :cpp:enumerator:`UART_COBS_EVT_USER_START<uart_cobs::UART_COBS_EVT_USER_START>` is sent to the provided callback function once the API is ready for use.
+Once a user has received this event, it will have exclusive access to the API and will not be preempted.
+To release the UART and make it available to other users, one must call :cpp:func:`uart_cobs_user_end` with an error code.
+An event :cpp:enumerator:`UART_COBS_EVT_USER_END` will then be sent to the user callback, with the error code included in the event.
+
+Whenever a user claims or releases the UART, the library may enter a "switch" state in which asynchronous sends and receives are aborted.
+The return values of :cpp:func:`uart_cobs_user_start` and :cpp:func:`uart_cobs_user_end` indicate whether this state was entered.
+The above events will always be sent after this switch has completed.
+
+In addition to exclusive users, the library also supports a "default user" which is set using :cpp:func:`uart_cobs_default_user_set`.
+This user will be active whenever no other users are active, and may be preempted whenever :cpp:func:`uart_cobs_user_start` is called.
+This makes the default user suitable for passive listening.
+
+
+Reception and transmission
+**************************
+
+To start receiving data, call :cpp:func:`uart_cobs_rx_start` with the number of bytes to receive.
+The UART COBS library will then start receiving data in an internal buffer.
+Once a complete COBS frame has been decoded, an event :cpp:enumerator:`UART_COBS_EVT_RX<uart_cobs::UART_COBS_EVT_RX>` will be sent containing a pointer to the received (decoded) data and the length of the data.
+
+The reception can be stopped prematurely.
+When this occurs the UART COBS library will generate an event :cpp:enumerator:`UART_COBS_EVT_RX_END<uart_cobs::UART_COBS_EVT_RX_END>` with a negative error code that describes the reason why it stopped.
+The following error codes are possible:
+
+.. list-table:: Reasons and corresponding error codes for stopped reception.
+   :header-rows: 1
+
+   * - Reason
+     - Error code
+   * - :cpp:func:`uart_cobs_rx_stop` was called by the user
+     - ``-ECONNABORTED``
+   * - Receive timeout
+     - ``-ETIMEDOUT``
+   * - UART break error
+     - ``-ENETDOWN``
+
+Other UART errors than the break error will cause an automatic restart of the reception and will not generate an event.
+
+Receive timeout can be started optionally with :cpp:func:`uart_cobs_rx_timeout_start`.
+The timeout must be stopped with :cpp:func:`uart_cobs_rx_timeout_stop`.
+Once the receive timeout occurs the reception will be automatically stopped.
+
+Sending data is performed in a two-step process.
+First, the data to send is written to an internal buffer using :cpp:func:`uart_cobs_tx_buf_write`.
+This function may be called multiple times and will store the length of previously written data.
+This means that consecutive calls will result in writing contiguous positions in the buffer.
+The buffer may be reset with :cpp:func:`uart_cobs_tx_buf_clear` if necessary.
+After the buffer is written, it is sent by calling :cpp:func:`uart_cobs_tx_start` with an optional timeout.
+
+When transmission stops, an event :cpp:enumerator:`UART_COBS_EVT_TX_END<uart_cobs::UART_COBS_EVT_TX_END>` is sent.
+The event contains an error code that is either negative or zero.
+The following error codes are possible:
+
+.. list-table:: Reasons and corresponding error codes for stopped transmission.
+   :header-rows: 1
+
+   * - Reason
+     - Error code
+   * - Transmission completed normally
+     - 0
+   * - :cpp:func:`uart_cobs_tx_stop` was called by the user
+     - -ECONNABORTED
+   * - Transmission timeout (due to flow control)
+     - -ETIMEDOUT
+
+
+Devicetree configuration
+************************
+
+The UART instance to use with the library is selected by setting the DTS chosen node property ``nordic,cobs-uart-controller`` to the DTS node of the instance.
+For example, to use ``uart1``:
+
+.. code-block:: DTS
+
+   / {
+        chosen {
+                nordic,cobs-uart-controller=&uart1;
+        };
+   };
+
+The selected UART instance (e.g. ``uart1``) is required to have ``compatible = "nordic,nrf-uarte"`` and ``hw-flow-control`` set.
+This is because the UART COBS library takes advantage of EasyDMA and flow control.
+An example configuration for ``uart1`` is shown below:
+
+.. code-block:: DTS
+
+   &uart1 {
+           compatible = "nordic,nrf-uarte";
+           status = "okay";
+	   hw-flow-control;
+	   /* ... */
+   };
+
+
+Kconfig configuration
+*********************
+
+
+
+
+
+Limitations
+***********
+* Payload sizes up to 253 bytes are supported.
+* The library requires ``UART_ASYNC_API``.
+
+
+API documentation
+*****************
+
+| Header file: :file:`include/uart_cobs.h`
+| Source files: :file:`lib/uart_cobs`
+
+.. doxygengroup:: uart_cobs
+   :project: nrf
+   :members:
