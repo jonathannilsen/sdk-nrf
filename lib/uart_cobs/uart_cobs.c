@@ -5,6 +5,20 @@
  */
 
 #include <zephyr.h>
+
+#define UART_COBS_DT DT_CHOSEN(nordic_cobs_uart_controller)
+
+#if !DT_NODE_EXISTS(UART_COBS_DT)
+#error "Missing /chosen devicetree node: nordic,cobs-uart-controller"
+
+#elif !DT_NODE_HAS_STATUS(UART_COBS_DT, okay)
+#error "nordic,cobs-uart-controller not enabled"
+
+#elif !DT_PROP(UART_COBS_DT, hw_flow_control)
+#error "Hardware flow control not enabled for nordic,cobs-uart-controller"
+
+#else
+
 #include <sys/time_units.h>
 #include <sys/atomic.h>
 #include <logging/log.h>
@@ -13,19 +27,8 @@
 #include <uart_cobs.h>
 #include "cobs.h"
 
-/* Devicetree node for the chosen UART controller. */
-#define UART_COBS_DT	 DT_CHOSEN(nordic_cobs_uart_controller)
-
 #define EVT_SEND	 ((uart_cobs_cb_t) atomic_ptr_get(&state.user.current))
 #define LOG_DBG_DEV(...) LOG_DBG(DT_LABEL(UART_COBS_DT) ": " __VA_ARGS__)
-
-/* Compile-time validation of chosen UART controller. */
-BUILD_ASSERT(DT_NODE_EXISTS(UART_COBS_DT),
-	     "Missing /chosen devicetree node: nordic,cobs-uart-controller");
-BUILD_ASSERT(DT_NODE_HAS_STATUS(UART_COBS_DT, okay),
-	     DT_LABEL(UART_COBS_DT) " not enabled");
-BUILD_ASSERT(DT_PROP(UART_COBS_DT, hw_flow_control),
-	     "Hardware flow control not enabled for " DT_LABEL(UART_COBS_DT));
 
 LOG_MODULE_REGISTER(uart_cobs, CONFIG_UART_COBS_LOG_LEVEL);
 
@@ -589,3 +592,6 @@ bool uart_cobs_in_work_q_thread(void)
 }
 
 SYS_INIT(uart_cobs_sys_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+
+#endif /* DT_NODE_EXISTS(UART_COBS_DT) */
