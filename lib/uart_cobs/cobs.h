@@ -134,6 +134,7 @@ static inline int cobs_decode_step(struct cobs_dec *dec, uint8_t byte)
 			dec->in_frame = false;
 			return !dec->counter ? dec->idx : -ENOTSUP;
 		} else if (dec->idx >= COBS_MAX_DATA_BYTES) {
+			dec->in_frame = false;
 			return -EMSGSIZE;
 		} else if (!dec->counter) {
 			dec->counter = byte;
