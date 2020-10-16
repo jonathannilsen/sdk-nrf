@@ -65,7 +65,7 @@ int uart_blob_tx_init(struct uart_blob_tx_cb *callbacks);
 /**
  * @brief Start UART BLOB sender to enable BLOB transfer.
  * @retval 0 If successful.
- * @retval -EBUSY If unable to start due to other UART DFU activity.
+ * @retval -EBUSY If unable to start due to other UART activity.
  */
 int uart_blob_tx_enable(void);
 

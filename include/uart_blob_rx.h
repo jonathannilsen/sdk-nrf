@@ -41,7 +41,9 @@ struct uart_blob_rx_cb {
 	/**
 	 * @brief Callback to signal a BLOB offset request from the remote
 	 * 	  sender.
-	 * @param[out] offset Returns the offset of the BLOB transfer.
+	 * @param[out] offset The offset of the BLOB transfer.
+	 *                    The handler should set this value to the current
+	 *                    offset of the transfer.
 	 * @returns 0 if successfully handled, otherwise negative error code.
 	 */
 	int (*offset_cb)(size_t *offset);

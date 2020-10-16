@@ -213,20 +213,6 @@ static int dfu_button_init(void)
 		goto done;
 	}
 
-	err = gpio_pin_interrupt_configure(gpiob,
-					DT_GPIO_PIN(DT_ALIAS(sw0), gpios),
-					GPIO_INT_EDGE_TO_ACTIVE);
-	if (err != 0) {
-		goto done;
-	}
-
-	err = gpio_pin_interrupt_configure(gpiob,
-					DT_GPIO_PIN(DT_ALIAS(sw1), gpios),
-					GPIO_INT_EDGE_TO_ACTIVE);
-	if (err != 0) {
-		goto done;
-	}
-	
 	gpio_init_callback(&gpio_cb, dfu_button_pressed,
 		BIT(DT_GPIO_PIN(DT_ALIAS(sw0), gpios)) |
 		BIT(DT_GPIO_PIN(DT_ALIAS(sw1), gpios)));
@@ -308,6 +294,8 @@ static int application_init(void)
 	if (err != 0) {
 		return err;
 	}
+
+	dfu_buttons_enable();
 
 	return 0;
 }

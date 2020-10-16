@@ -23,11 +23,12 @@
 
 /**
  * @brief Define UART COBS user structure.
+ * @param _name Name of the user structure.
+ * @param _cb Event callback for the user.
  */
-#define UART_COBS_USER_DEFINE(_name, _cb, _ctx)	\
+#define UART_COBS_USER_DEFINE(_name, _cb)	\
 	static struct uart_cobs_user _name = {	\
-		.cb = _cb,			\
-		.ctx = _ctx			\
+		.cb = _cb			\
 	}
 
 /**
@@ -40,6 +41,8 @@ enum uart_cobs_evt_type {
 	UART_COBS_EVT_USER_END,
 	/** Received data. */
 	UART_COBS_EVT_RX,
+	/* FIXME: Have rx/rx_aborted, tx/tx_aborted. */
+	UART_COBS_EVT_TX,
 	/** Reception aborted by user/timeout/UART break. */
 	UART_COBS_EVT_RX_END,
 	/** Transmission completed or aborted by user/timeout. */
@@ -61,6 +64,7 @@ struct uart_cobs_evt {
 	enum uart_cobs_evt_type type;
 	/** Event data. */
 	union {
+		/* FIXME: Include tx stats struct? */
 		/** Event structure used by UART_COBS_EVT_RX. */
 		struct {
 			const uint8_t *buf;
@@ -78,8 +82,9 @@ struct uart_cobs_evt {
  * @brief UART COBS user structure.
  */
 struct uart_cobs_user {
-	void (*cb)(const struct uart_cobs_evt *const evt, void *ctx);
-	void *ctx;
+	/** @brief User event callback. */
+	void (*cb)(const struct uart_cobs_user *user,
+		   const struct uart_cobs_evt *evt);
 };
 
 /**
@@ -95,7 +100,7 @@ struct uart_cobs_user {
  * @retval -EBUSY Another user is already active (i.e. not in the idle state).
  * @retval -EALREADY @p user_cb is already active.
  */
-int uart_cobs_user_start(struct uart_cobs_user *user);
+int uart_cobs_user_start(const struct uart_cobs_user *user);
 
 /**
  * @brief Clear user event handler and switch to idle state.
@@ -108,9 +113,14 @@ int uart_cobs_user_start(struct uart_cobs_user *user);
  * @retval -EINVAL @p user_cb was NULL. 
  * @retval -EBUSY The given user is not active.
  */
-int uart_cobs_user_end(struct uart_cobs_user *user, int err);
+int uart_cobs_user_end(const struct uart_cobs_user *user, int err);
 
-bool uart_cobs_user_active(struct uart_cobs_user *user);
+/**
+ * @brief Check if the given user is the current user of the module.
+ * @param user The user to check.
+ * @returns true if @p user is the current user of the module, false otherwise.
+ */
+bool uart_cobs_user_active(const struct uart_cobs_user *user);
 
 /**
  * @brief Set event handler for the idle state (i.e. when no user is active).
@@ -122,23 +132,34 @@ bool uart_cobs_user_active(struct uart_cobs_user *user);
  * @retval 0 Successfully set idle event handler.
  * @retval -EBUSY Can not update idle handler in the current state.
  */
-int uart_cobs_default_user_set(struct uart_cobs_user *user);
+int uart_cobs_idle_user_set(const struct uart_cobs_user *user);
 
 /**
- * @brief Get a pointer to the UART COBS TX buffer.
- * @details Data written to the returned buffer will be automatically
+ * @brief Write data to the TX buffer.
+ * @details The function may be called multiple times to write contiguous
+ *          regions of the buffer.
+ *	    Data written to the returned buffer will be automatically
  *          COBS-encoded and transmitted by calling @ref uart_cobs_tx_start.
- *          The returned buffer has max. length of @ref COBS_MAX_DATA_BYTES.
- * @returns Pointer to the TX buffer.
+ *          The buffer has max. length of @ref COBS_MAX_DATA_BYTES.
+ * @retval 0 if successful.
+ * @retval -EINVAL @p data was NULL.
+ * @retval -EACCES @p user is not currently active.
+ * @retval -ENOMEM Not enough space in the TX buffer.
+ * @retval -EBUSY Transmission is currently ongoing.
  */
-
-int uart_cobs_tx_buf_write(struct uart_cobs_user *user,
-			   uint8_t *data, size_t len);
-
-int uart_cobs_tx_buf_clear(struct uart_cobs_user *user);
+int uart_cobs_tx_buf_write(const struct uart_cobs_user *user,
+			   const uint8_t *data, size_t len);
 
 /**
- * @brief Start transmission of the UART COBS TX buffer.
+ * @brief Clear the TX buffer.
+ * @retval 0 if successful.
+ * @retval -EACCES @p user is not currently active.
+ * @retval -EBUSY Transmission is currently ongoing.
+ */
+int uart_cobs_tx_buf_clear(const struct uart_cobs_user *user);
+
+/**
+ * @brief Start transmission of the TX buffer.
  * @details Data should be written directly to the buffer returned by
  *          @ref uart_cobs_tx_buf_get prior to calling this function.
  * @param len      Length of data in the TX buffer (unencoded).
@@ -146,7 +167,7 @@ int uart_cobs_tx_buf_clear(struct uart_cobs_user *user);
  * @retval 0       Successfully started transmission.
  * @retval -EBUSY  Transmission already started.
  */
-int uart_cobs_tx_start(struct uart_cobs_user *user, int timeout);
+int uart_cobs_tx_start(const struct uart_cobs_user *user, int timeout);
 
 /**
  * @brief Stop ongoing transmission.
@@ -154,15 +175,15 @@ int uart_cobs_tx_start(struct uart_cobs_user *user, int timeout);
  *          @ref UART_COBS_EVT_TX_END will be generated once stopped.
  * @retval 0 Stopping the transmission.
  */
-int uart_cobs_tx_stop(struct uart_cobs_user *user);
+int uart_cobs_tx_stop(const struct uart_cobs_user *user);
 
 /**
- * @brief Start reception of @p len bytes of data.
+ * @brief Start reception of up to @p len bytes of data.
  * @param len Length of data to receive (unencoded).
  * @retval 0 Successfully started reception.
  * @retval -EBUSY Reception already started. 
  */
-int uart_cobs_rx_start(struct uart_cobs_user *user, size_t len);
+int uart_cobs_rx_start(const struct uart_cobs_user *user, size_t len);
 
 /**
  * @brief Stop ongoing reception.
@@ -170,18 +191,18 @@ int uart_cobs_rx_start(struct uart_cobs_user *user, size_t len);
  *          @ref UART_COBS_EVT_RX_END will be generated once stopped.
  * @retval 0 Stopping the reception.
  */
-int uart_cobs_rx_stop(struct uart_cobs_user *user);
+int uart_cobs_rx_stop(const struct uart_cobs_user *user);
 
 /**
  * @brief Start RX timeout.
  * @param timeout Timeout in milliseconds.
  */
-int uart_cobs_rx_timeout_start(struct uart_cobs_user *user, int timeout);
+int uart_cobs_rx_timeout_start(const struct uart_cobs_user *user, int timeout);
 
 /**
  * @brief Stop RX timeout.
  */
-int uart_cobs_rx_timeout_stop(struct uart_cobs_user *user);
+int uart_cobs_rx_timeout_stop(const struct uart_cobs_user *user);
 
 /**
  * @brief Check if currently in the UART COBS workqueue thread context.
