@@ -63,34 +63,17 @@ static struct k_poll_signal sig_ready = K_POLL_SIGNAL_INITIALIZER(sig_ready);
 static struct k_poll_signal sig_gpio = K_POLL_SIGNAL_INITIALIZER(sig_gpio);
 
 
-static void log_rx_error(int err)
+static void log_error(const char *op, enum uart_cobs_err err)
 {
 	switch (err) {
-	case UART_COBS_END_REASON_TIMEOUT:
-		printk("RX timeout.\n");
+	case UART_COBS_ERR_ABORT:
+		printk("%s: aborted.", op);
 		break;
-	case UART_COBS_END_REASON_ABORT:
-		printk("RX aborted.\n");
+	case UART_COBS_ERR_TIMEOUT:
+		printk("%s: timed out.", op);
 		break;
-	case UART_COBS_END_REASON_BREAK:
-		printk("RX break error.\n");
-		break;
-	default:
-		break;
-	}
-}
-
-static void log_tx_error(int err)
-{
-	switch (err) {
-	case UART_COBS_END_REASON_DONE:
-		printk("Sent bytes.\n");
-		break;
-	case UART_COBS_END_REASON_TIMEOUT:
-		printk("TX timeout.\n");
-		break;
-	case UART_COBS_END_REASON_ABORT:
-		printk("TX aborted.\n");
+	case UART_COBS_ERR_BREAK:
+		printk("%s: UART break error.", op);
 		break;
 	default:
 		break;
@@ -151,11 +134,11 @@ static void cobs_idle_evt_handler(const struct uart_cobs_user *user,
 			msg_pong_start(&user_b);
 		}
 		break;
-	case UART_COBS_EVT_RX_END:
-		log_rx_error(evt->data.err);
+	case UART_COBS_EVT_RX_ERR:
+		log_error("RX", evt->data.err);
 		break;
-	case UART_COBS_EVT_TX_END:
-		log_tx_error(evt->data.err);
+	case UART_COBS_EVT_TX_ERR:
+		log_error("TX", evt->data.err);
 		break;
 	default:
 		break;
@@ -166,6 +149,7 @@ static void cobs_user_evt_handler(const struct uart_cobs_user *user,
 				  const struct uart_cobs_evt *evt)
 {
 	struct user_info *info = CONTAINER_OF(user, struct user_info, user);
+
 	switch (evt->type) {
 	case UART_COBS_EVT_USER_START:
 		printk("%s started!\n", info->name);
@@ -197,20 +181,20 @@ static void cobs_user_evt_handler(const struct uart_cobs_user *user,
 			(void) uart_cobs_user_end(user, 0);
 		}
 		break;
-	case UART_COBS_EVT_RX_END:
-		log_rx_error(evt->data.err);
-		if (evt->data.err != UART_COBS_END_REASON_DONE) {
-			(void) uart_cobs_user_end(user, evt->data.err);
+	case UART_COBS_EVT_TX:
+		if (info->state == USER_STATE_PONG) {
+			/* Sent pong */
+			(void) uart_cobs_user_end(user, 0);
 		}
 		break;
-	case UART_COBS_EVT_TX_END:
-		log_tx_error(evt->data.err);
-		if (evt->data.err == UART_COBS_END_REASON_DONE &&
-		    info->state == USER_STATE_PONG) {
-			(void) uart_cobs_user_end(user, 0);
-		} else if (evt->data.err != UART_COBS_END_REASON_DONE) {
-			(void) uart_cobs_user_end(user, evt->data.err);
-		}
+	case UART_COBS_EVT_RX_ERR:
+		log_error("RX", evt->data.err);
+		(void) uart_cobs_user_end(user, evt->data.err);
+		break;
+	
+	case UART_COBS_EVT_TX_ERR:
+		log_error("TX", evt->data.err);
+		(void) uart_cobs_user_end(user, evt->data.err);
 		break;
 	default:
 		break;

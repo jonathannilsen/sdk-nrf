@@ -108,29 +108,29 @@ static inline bool tx_error_set(int err)
 	return status_error_set(&state.tx.status, err);
 }
 
-static inline void evt_send(const struct uart_cobs_evt *const evt)
+static inline void send_evt(const struct uart_cobs_evt *const evt)
 {
 	struct uart_cobs_user *user;
 	user = (struct uart_cobs_user *) atomic_ptr_get(&state.user.current);
 	user->cb(user, evt);
 }
 
-static void send_evt_end(enum uart_cobs_evt_type type, int err)
+static void send_evt_err(enum uart_cobs_evt_type type, int err)
 {
 	struct uart_cobs_evt evt;
 	evt.type = type;
 	evt.data.err = err;
-	evt_send(&evt);
+	send_evt(&evt);
 }
 
-static void user_start(void)
+static void send_evt_user_start(void)
 {
 	struct uart_cobs_evt evt;
 	evt.type = UART_COBS_EVT_USER_START;
-	evt_send(&evt);
+	send_evt(&evt);
 }
 
-static void user_end(const struct uart_cobs_user *from, int err)
+static void send_evt_user_end(const struct uart_cobs_user *from, int err)
 {
 	if (from != NULL) {
 		struct uart_cobs_evt evt;
@@ -185,7 +185,7 @@ static void user_sw_finish(void)
 {
 	LOG_DBG_DEV("User end: %lu",
 		    (long unsigned int) state.user.pending.from);
-	user_end(state.user.pending.from, state.user.pending.err);
+	send_evt_user_end(state.user.pending.from, state.user.pending.err);
 
 	LOG_DBG_DEV("User start: %lu",
 		    (long unsigned int) state.user.pending.to);
@@ -194,7 +194,7 @@ static void user_sw_finish(void)
 		 "Expected RX and TX to be off before switching user");
 	(void) atomic_ptr_set(&state.user.current,
 			(atomic_ptr_t) state.user.pending.to);
-	user_start();
+	send_evt_user_start();
 }
 
 static int user_sw_prepare(const struct uart_cobs_user *from,
@@ -296,7 +296,7 @@ static void rx_process(void)
 		}
 		LOG_DBG_DEV("RX PDU event");
 		evt.data.rx.len = ret;
-		evt_send(&evt);
+		send_evt(&evt);
 
 		if (!state.rx.processing) {
 			/* Processing was aborted due to session switch. */
@@ -342,7 +342,7 @@ static void rx_dis_process(struct k_work *work)
 		/* Fatal error. */
 		LOG_DBG_DEV("RX stopped with error: %d", status);
 		state.rx.processing = false;
-		send_evt_end(UART_COBS_EVT_RX_END, status);
+		send_evt_err(UART_COBS_EVT_RX_ERR, status);
 	}
 }
 
@@ -351,14 +351,18 @@ static void tx_dis_process(struct k_work *work)
 	ARG_UNUSED(work);
 
 	atomic_val_t status = atomic_set(&state.tx.status, STATUS_OFF);
+	size_t len = state.tx.len;
 	state.tx.len = 0;
 
 	if (status < 0) {
 		LOG_DBG_DEV("TX stopped with error %d", status);
-		send_evt_end(UART_COBS_EVT_TX_END, status);
+		send_evt_err(UART_COBS_EVT_TX_ERR, status);
 	} else {
 		LOG_DBG_DEV("TX complete event");
-		send_evt_end(UART_COBS_EVT_TX_END, 0);
+		struct uart_cobs_evt evt;
+		evt.type = UART_COBS_EVT_TX;
+		evt.data.tx.len = len;
+		send_evt(&evt);
 	}
 }
 
@@ -408,7 +412,7 @@ static void uart_rx_stopped_handle(struct uart_event_rx_stop *evt)
 		break;
 	case UART_BREAK:
 	default:
-		(void) rx_error_set(-ENETDOWN);
+		(void) rx_error_set(UART_COBS_ERR_BREAK);
 		break;
 	}
 }

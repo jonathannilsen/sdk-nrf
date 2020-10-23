@@ -35,46 +35,67 @@
  * @brief UART COBS event types.
  */
 enum uart_cobs_evt_type {
-	/** UART access granted to user. */
+	/** @brief UART access granted to user. */
 	UART_COBS_EVT_USER_START,
-	/** UART access revoked from user. */
+	/** @brief UART access revoked from user. */
 	UART_COBS_EVT_USER_END,
-	/** Received data. */
+	/** @brief Received data. */
 	UART_COBS_EVT_RX,
-	/* FIXME: Have rx/rx_aborted, tx/tx_aborted. */
+	/** @brief Reception aborted by user/timeout/UART break. */
+	UART_COBS_EVT_RX_ERR,
+	/** @brief Transmission completed. */
 	UART_COBS_EVT_TX,
-	/** Reception aborted by user/timeout/UART break. */
-	UART_COBS_EVT_RX_END,
-	/** Transmission completed or aborted by user/timeout. */
-	UART_COBS_EVT_TX_END,
+	/** @brief Transmission aborted by user/timeout. */
+	UART_COBS_EVT_TX_ERR
 };
 
-enum uart_cobs_end_reason {
-	UART_COBS_END_REASON_DONE	= 0,
-	UART_COBS_END_REASON_ABORT	= -ECONNABORTED,
-	UART_COBS_END_REASON_TIMEOUT	= -ETIMEDOUT,
-	UART_COBS_END_REASON_BREAK	= -ENETDOWN
+/**
+ * @brief UART COBS RX/TX error types.
+ */
+enum uart_cobs_err {
+	/** @brief User abort error. */
+	UART_COBS_ERR_ABORT	= -ECONNABORTED,
+	/** @brief Timeout error. */
+	UART_COBS_ERR_TIMEOUT	= -ETIMEDOUT,
+	/** @brief UART break error. */
+	UART_COBS_ERR_BREAK	= -ENETDOWN
 };
 
 /**
  * @brief UART COBS event structure.
  */
 struct uart_cobs_evt {
-	/** Event type. */
+	/** @brief Event type. */
 	enum uart_cobs_evt_type type;
-	/** Event data. */
+	/** @brief Event data. */
 	union {
-		/* FIXME: Include tx stats struct? */
-		/** Event structure used by UART_COBS_EVT_RX. */
+		/** @brief Event structure used by UART_COBS_EVT_USER_END. */
 		struct {
+			/**
+			 * @brief Status code passed to @ref uart_cobs_user_end. 
+			 */
+			int status;
+		} end;
+
+		/** @brief Event structure used by UART_COBS_EVT_RX. */
+		struct {
+			/** @brief Buffer containing received data. */
 			const uint8_t *buf;
+			/** @brief Length of received data. */
 			size_t len;
 		} rx;
+
+		/** @brief Event structure used by UART_COBS_EVT_TX. */
+		struct {
+			/** @brief Length of sent data. */
+			size_t len;
+		} tx;
+
 		/**
-		 * Error value used by UART_COBS_EVT_USER_EXIT,
-		 * UART_COBS_EVT_RX_END, and UART_COBS_EVT_TX_END.
+		 * @brief Error value used by @ref UART_COBS_EVT_RX_ERR and
+		 *        @ref UART_COBS_EVT_TX_ERR.
 		 */
-		int err;
+		enum uart_cobs_err err;
 	} data;
 };
 

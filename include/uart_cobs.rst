@@ -168,7 +168,6 @@ The UART COBS library uses a workqueue thread for handling some UART events and 
 Limitations
 ***********
 * Payload sizes up to 253 bytes are supported.
-* The library requires ``UART_ASYNC_API``.
 
 
 API documentation
