@@ -1,19 +1,9 @@
 sample:
-  name: Low Power UART
-  description: Low Power UART sample
+  name: UART Consistent Overhead Byte Stuffing (COBS)
+  description: UART Consistent Overhead Byte Stuffing (COBS) sample
 tests:
-  samples.peripheral.lpuart:
+  samples.peripheral.uart_cobs:
     build_only: true
     build_on_all: true
-    platform_whitelist: nrf52dk_nrf52832 nrf52840dk_nrf52840 nrf9160dk_nrf9160
-                        nrf5340dk_nrf5340_cpuapp
+    platform_whitelist: nrf52840dk_nrf52840 nrf9160dk_nrf9160ns nrf9160dk_nrf52840
     tags: ci_build
-
-  samples.peripheral.lpuart_int_driven:
-    build_only: true
-    build_on_all: true
-    platform_whitelist: nrf52dk_nrf52832 nrf52840dk_nrf52840 nrf9160dk_nrf9160
-                        nrf5340dk_nrf5340_cpuapp
-    tags: ci_build
-    extra_configs:
-      - CONFIG_NRF_SW_LPUART_INT_DRIVEN=y

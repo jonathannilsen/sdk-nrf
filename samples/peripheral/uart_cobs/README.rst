@@ -1,55 +1,67 @@
-.. _lpuart_sample:
+.. _uart_cobs_sample:
 
-Low Power UART
-##############
+UART Consistent Overhead Byte Stuffing 
+######################################
 
-The Low Power UART sample demonstrates the capabilities of the :ref:`uart_nrf_sw_lpuart` module.
+The UART Consistent Overhead Byte Stuffing (COBS) sample demonstrates the capabilities of the :ref:`doc_uart_cobs` module.
+The sample shows automatic COBS encoding and decoding, managing multiple module users and use of RX/TX timeouts.
 
 Overview
 ********
 
-The sample implements a simple loopback using a single UART instance.
-The sample has console and logging disabled by default, to demonstrate low power consumption while having UART active.
+The sample implements a simple two-way communication between two devices.
+Pressing a button on the development board causes that device to send "PING" over UART.
+After receiving "PING", the other device responds with "PONG".
 
 Requirements
 ************
 
-* One of the following development boards:
-
+* Either, two of the following development boards:
 .. table-from-rows:: /includes/sample_board_rows.txt
    :header: heading
-   :rows: nrf9160dk_nrf9160, nrf52840dk_nrf52840, nrf52dk_nrf52832, nrf5340pdk_nrf5340_cpuapp
+   :rows: nrf52840dk_nrf52840
+* Or one of the following development boards:
+.. table-from-rows:: /includes/sample_board_rows.txt
+   :header: heading
+   :rows: nrf9160dk_nrf9160ns
 
-* The following pins shorted:
+* If using two :ref:`nRF52840 DK <ug_nrf52>`, the UART pins for each board must be wired together externally using the GPIO pins.
+  Check the configuration for each board for information about which pins are used.
+* If using one :ref:`nRF9160 DK <ug_nrf9160>`, the on-board devices are connected internally, so no external wiring is required.
 
-  * TX (Arduino Digital Pin 10) with RX (Arduino Digital Pin 11)
-  * Request Pin (Arduino Digital Pin 12) with Response Pin (Arduino Digital Pin 13)
+User interface
+**************
 
-* A logic analyzer
+Button 1:
+   * Send a COBS-encoded message containing "PING" over UART. 
 
 Building and running
 ********************
-.. |sample path| replace:: :file:`samples/peripheral/lpuart`
+.. |sample path| replace:: :file:`samples/peripheral/uart_cobs`
 
 .. include:: /includes/build_and_run.txt
+
+.. note:: If using the :ref:`nRF9160 DK <ug_nrf9160>`, each of the ``nrf9160dk_nrf9160ns`` and ``nrf9160dk_nrf52840`` targets must be built and programmed to the board.
 
 Testing
 =======
 
-After programming the sample to your development kit, test it by performing the following steps:
+After programming the sample to your development kit(s), test it by performing the following steps:
 
-1. Connect the logic analyzer to the shorted pins, to confirm UART activity.
-2. Measure the current to confirm that the power consumption indicates that high-frequency clock is disabled during the idle stage.
-   During the idle stage, the UART receiver is ready to start reception, as the request pin wakes it up.
+1. Connect to the logging output of each of the devices.
+2. On one of the boards, press Button 1 as indicated in the log output.
+3. Observe that the text 'PING: sending "PING"' is printed in the log output of that board.
+4. Observe that the text 'PONG: received "PING"' and 'PONG: sending "PONG"' is printed in the log output of the other board.
+5. Observe that the text 'PING: received "PONG"' is printed in the log output of the first board.
 
 Dependencies
 ************
 
-This sample uses the following |NCS| driver:
+This sample uses the following |NCS| library:
 
-* :ref:`uart_nrf_sw_lpuart`
+* :ref:`doc_uart_cobs`
 
 In addition, it uses the following Zephyr libraries:
 
 * :ref:`zephyr:device_model_api`
-* :ref:`zephyr:logging_api`
+* :ref:`zephyr:polling_v2`

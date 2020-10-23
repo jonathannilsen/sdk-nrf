@@ -14,11 +14,8 @@
 #elif !DT_NODE_HAS_STATUS(UART_COBS_DT, okay)
 #error "nordic,cobs-uart-controller not enabled"
 
-/* FIXME: causes issues with uart1 on nrf52840dk_nrf52840 */
-/*
 #elif !DT_PROP(UART_COBS_DT, hw_flow_control)
 #error "Hardware flow control not enabled for nordic,cobs-uart-controller"
-*/
 
 #else
 
@@ -108,7 +105,7 @@ static inline bool tx_error_set(int err)
 	return status_error_set(&state.tx.status, err);
 }
 
-static inline void send_evt(const struct uart_cobs_evt *const evt)
+static inline void send_evt(const struct uart_cobs_evt *evt)
 {
 	struct uart_cobs_user *user;
 	user = (struct uart_cobs_user *) atomic_ptr_get(&state.user.current);
@@ -118,6 +115,7 @@ static inline void send_evt(const struct uart_cobs_evt *const evt)
 static void send_evt_err(enum uart_cobs_evt_type type, int err)
 {
 	struct uart_cobs_evt evt;
+	memset(&evt, 0, sizeof(evt));
 	evt.type = type;
 	evt.data.err = err;
 	send_evt(&evt);
@@ -126,6 +124,7 @@ static void send_evt_err(enum uart_cobs_evt_type type, int err)
 static void send_evt_user_start(void)
 {
 	struct uart_cobs_evt evt;
+	memset(&evt, 0, sizeof(evt));
 	evt.type = UART_COBS_EVT_USER_START;
 	send_evt(&evt);
 }
@@ -134,6 +133,7 @@ static void send_evt_user_end(const struct uart_cobs_user *from, int err)
 {
 	if (from != NULL) {
 		struct uart_cobs_evt evt;
+		memset(&evt, 0, sizeof(evt));
 		evt.type = UART_COBS_EVT_USER_END;
 		evt.data.err = err;
 		from->cb(from, &evt);
@@ -550,7 +550,7 @@ int uart_cobs_idle_user_set(const struct uart_cobs_user *user)
 		return -EALREADY;
 	}
 
-	(void) user_sw_prepare(prev_user, user, 0);
+	(void) user_sw_prepare(&no_user, user, 0);
 	return 0;
 }
 
