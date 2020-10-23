@@ -14,6 +14,7 @@ Consistent Overhead Byte Stuffing
 
 Consistent Overhead Byte Stuffing (COBS) is a byte encoding that enables packet framing with a small and predictable overhead.
 COBS encodes the data in the following way, illustrated using an example.
+The below table shows an example payload:
 
 +----------------+
 | Data (hex)     |
@@ -23,7 +24,7 @@ COBS encodes the data in the following way, illustrated using an example.
 
 Given the unencoded data above, the following steps are performed.
 An overhead byte *O* with value ``0x00`` is inserted before the packet data.
-The delimiter byte *D* with value ``0x00`` is inserted after the packet data.
+The delimiter byte *D* with value ``0x00`` is inserted after the packet data:
 
 +----+----------------+----+
 | O  | Data (hex)     | D  |
@@ -31,11 +32,11 @@ The delimiter byte *D* with value ``0x00`` is inserted after the packet data.
 | 00 | 00 11 22 00 33 | 00 |
 +----+----------------+----+
 
-For each byte, including *O* but not including *D*:
+For each byte, including *O* but not including *D* :
 * If the byte is equal to ``0x00``, it is instead set to the relative offset to the next ``0x00`` byte in the data.
 * Otherwise, the byte is left unchanged.
 
-In this example, *O* points to the first data byte (offset 1), which points to the fourth data byte (offset 3), which finally points to the delimiter (offset 2).
+In this example, *O* points to the first data byte (offset 1), which points to the fourth data byte (offset 3), which finally points to the delimiter (offset 2):
 
 +----+----------------+----+
 | O  | Data (hex)     | D  |
@@ -53,18 +54,19 @@ It starts at the first received byte (i.e. the overhead byte *O*) and uses the r
 User concept
 ************
 
-To use the API one must first define a :cpp:struct:`uart_cobs_user` containing a pointer to an event handler function and an optional context pointer.
-The convenience macro :cpp:macro:`UART_COBS_USER_DEFINE` can be used to define the structure.
-The user structure functions as an API user identifier and must be passed to all the API functions.
-Before using the API one must call :cpp:func:`uart_cobs_user_start` to claim access to the UART.
+To use the API one must first define a :cpp:struct:`uart_cobs_user` containing a pointer to an event handler function.
+The convenience macro :c:macro:`UART_COBS_USER_DEFINE` can be used to define the structure.
+This user structure functions as an API user identifier and must be passed to all the API functions.
+
+Before using the API for sending and receiving one must call :cpp:func:`uart_cobs_user_start` to claim access to the UART.
 An event with type :cpp:enumerator:`UART_COBS_EVT_USER_START<uart_cobs::UART_COBS_EVT_USER_START>` is sent to the provided callback function once the API is ready for use.
 Once a user has received this event, it will have exclusive access to the API and will not be preempted.
-To release the UART and make it available to other users, one must call :cpp:func:`uart_cobs_user_end` with an error code.
-An event :cpp:enumerator:`UART_COBS_EVT_USER_END<uart_cobs::UART_COBS_EVT_USER_END>` will then be sent to the user callback, with the error code included in the event.
+To release the UART and make it available to other users, one must call :cpp:func:`uart_cobs_user_end` with a status code.
+An event :cpp:enumerator:`UART_COBS_EVT_USER_END<uart_cobs::UART_COBS_EVT_USER_END>` will then be sent to the user callback, with the status code included in the event.
 
 Whenever a user claims or releases the UART, the library may enter a "switch" state in which asynchronous sends and receives are aborted.
 The return values of :cpp:func:`uart_cobs_user_start` and :cpp:func:`uart_cobs_user_end` indicate whether this state was entered.
-The above events will always be sent *after* this switch has completed.
+The above events will always be sent *after* all asynchronous actions have been stopped.
 
 In addition to exclusive users, the library also supports an "idle user" which is set using :cpp:func:`uart_cobs_idle_user_set`.
 This idle user will be active whenever no other users are active, and may be preempted whenever :cpp:func:`uart_cobs_user_start` is called.
@@ -76,27 +78,17 @@ Reception and transmission
 
 To start receiving data, call :cpp:func:`uart_cobs_rx_start` with the number of bytes to receive.
 The UART COBS library will then start receiving data in an internal buffer.
-Once a complete COBS frame has been decoded, an event :cpp:enumerator:`UART_COBS_EVT_RX<uart_cobs::UART_COBS_EVT_RX>` will be sent containing a pointer to the received (decoded) data and the length of the data.
+Note that the library assumes that each reception contains up to one frame.
+Once a complete COBS frame has been decoded, an event :cpp:enumerator:`UART_COBS_EVT_RX<uart_cobs::UART_COBS_EVT_RX>` will be sent containing a pointer to the received (and decoded) data and the length of the data.
 
-The reception can be stopped before a frame has been decoded.
-When this occurs the UART COBS library will generate an event :cpp:enumerator:`UART_COBS_EVT_RX_END<uart_cobs::UART_COBS_EVT_RX_END>` with a negative error code that describes the reason why it stopped.
-The following error codes are possible:
-
-.. list-table:: Reasons and corresponding error codes for stopped reception.
-   :header-rows: 1
-
-   * - Reason
-     - Error code
-   * - :cpp:func:`uart_cobs_rx_stop` was called by the user
-     - ``-ECONNABORTED``
-   * - Receive timeout
-     - ``-ETIMEDOUT``
-   * - UART break error
-     - ``-ENETDOWN``
+The reception can be stopped before a frame has been decoded, either because of a user abort, timeout or UART break error.
+When this occurs the UART COBS library will generate an event :cpp:enumerator:`UART_COBS_EVT_RX_ERR<uart_cobs::UART_COBS_EVT_RX_ERR>` with the reason why it stopped.
+See :cpp:enumerator:`uart_cobs_err` for more information.
 
 Other UART errors than the break error will cause an automatic restart of the reception and will not generate an event.
 There is currently no way to access partially decoded frames.
 
+The reception by default does not have a timeout.
 Receive timeout can be optionally started with :cpp:func:`uart_cobs_rx_timeout_start`.
 The timeout must be stopped with :cpp:func:`uart_cobs_rx_timeout_stop`.
 Once the receive timeout occurs the reception will be automatically stopped and an event will be generated as described above.
@@ -106,25 +98,14 @@ First, the data to send is written to an internal buffer using :cpp:func:`uart_c
 This function may be called multiple times and will store the length of previously written data.
 This means that consecutive calls will result in writing contiguous positions in the buffer.
 The buffer may be reset with :cpp:func:`uart_cobs_tx_buf_clear` if necessary.
-After the buffer is written, it is sent by calling :cpp:func:`uart_cobs_tx_start`, specifying a send timeout.
+
+After the send buffer is written, it is sent by calling :cpp:func:`uart_cobs_tx_start`, specifying a send timeout.
 The timeout parameter can be set to ``SYS_FOREVER_MS`` to disable timeout.
 The call to :cpp:func:`uart_cobs_tx_start` will COBS-encode the send buffer before transmission.
+Once the transmission is complete, an event :cpp:enumerator:`UART_COBS_EVT_TX<uart_cobs::UART_COBS_EVT_TX>` is sent to the event callback.
 
-When transmission stops, an event :cpp:enumerator:`UART_COBS_EVT_TX_END<uart_cobs::UART_COBS_EVT_TX_END>` is sent.
-The event contains an error code that is either negative or zero.
-The following error codes are possible:
-
-.. list-table:: Reasons and corresponding error codes for stopped transmission.
-   :header-rows: 1
-
-   * - Reason
-     - Error code
-   * - Transmission completed normally
-     - 0
-   * - :cpp:func:`uart_cobs_tx_stop` was called by the user
-     - -ECONNABORTED
-   * - Transmission timeout (due to flow control)
-     - -ETIMEDOUT
+The transmission can be stopped prematurely either due to a user abort or a timeout.
+When this occurs an event :cpp:enumerator:`UART_COBS_EVT_TX_ERR` is generated containing the reason for the stop.
 
 
 Devicetree configuration
@@ -148,10 +129,10 @@ An example configuration for ``uart1`` containing these settings is shown below:
 .. code-block:: DTS
 
    &uart1 {
-     compatible = "nordic,nrf-uarte";
-     status = "okay";
-	   hw-flow-control;
-	   /* ... */
+          compatible = "nordic,nrf-uarte";
+          status = "okay";
+	    hw-flow-control;
+	    /* ... */
    };
 
 

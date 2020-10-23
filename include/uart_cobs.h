@@ -103,18 +103,22 @@ struct uart_cobs_evt {
  * @brief UART COBS user structure.
  */
 struct uart_cobs_user {
-	/** @brief User event callback. */
+	/**
+	 * @brief User event callback.
+	 * @param user Pointer to the surrounding structure.
+	 * @param evt UART COBS event.
+	 */
 	void (*cb)(const struct uart_cobs_user *user,
 		   const struct uart_cobs_evt *evt);
 };
 
 /**
  * @brief Set user event handler and switch to user.
- * @param user_cb Event handler.
  * @details This function should only be called when no user is active.
  *          An event with type @ref UART_COBS_EVT_USER_START will be generated
  *          and sent to the given @p user_cb if the handler was successfully
  *          set.
+ * @param user_cb Event handler.
  * @retval 0 Switched to user synchronously.
  * @retval -EINPROGRESS Started asynchronous switch to user.
  * @retval -EINVAL @p user_cb was NULL. 
@@ -125,16 +129,16 @@ int uart_cobs_user_start(const struct uart_cobs_user *user);
 
 /**
  * @brief Clear user event handler and switch to idle state.
- * @param user_cb Event handler.
  * @details An event with type @ref UART_COBS_EVT_USER_END will be generated
  *          and sent to the given @p user_cb when the user is disabled.
- * @param err Error code to be passed to event handler.
+ * @param user_cb Event handler.
+ * @param status Error code to be passed to event handler.
  * @retval 0 Switched to the idle state synchronously.
  * @retval -EINPROGRESS Started asynchronous switch to the idle state.
  * @retval -EINVAL @p user_cb was NULL. 
  * @retval -EBUSY The given user is not active.
  */
-int uart_cobs_user_end(const struct uart_cobs_user *user, int err);
+int uart_cobs_user_end(const struct uart_cobs_user *user, int status);
 
 /**
  * @brief Check if the given user is the current user of the module.
@@ -161,7 +165,7 @@ int uart_cobs_idle_user_set(const struct uart_cobs_user *user);
  *          regions of the buffer.
  *	    Data written to the returned buffer will be automatically
  *          COBS-encoded and transmitted by calling @ref uart_cobs_tx_start.
- *          The buffer has max. length of @ref COBS_MAX_DATA_BYTES.
+ *          The buffer has max. length of @ref UART_COBS_MAX_DATA_BYTES.
  * @retval 0 if successful.
  * @retval -EINVAL @p data was NULL.
  * @retval -EACCES @p user is not currently active.
@@ -186,6 +190,7 @@ int uart_cobs_tx_buf_clear(const struct uart_cobs_user *user);
  * @param len      Length of data in the TX buffer (unencoded).
  * @param timeout  Timeout in milliseconds.
  * @retval 0       Successfully started transmission.
+ * @retval -EACCES @p user is not currently active.
  * @retval -EBUSY  Transmission already started.
  */
 int uart_cobs_tx_start(const struct uart_cobs_user *user, int timeout);
@@ -193,8 +198,9 @@ int uart_cobs_tx_start(const struct uart_cobs_user *user, int timeout);
 /**
  * @brief Stop ongoing transmission.
  * @details The transmission is aborted asynchronously. An event with type
- *          @ref UART_COBS_EVT_TX_END will be generated once stopped.
+ *          @ref UART_COBS_EVT_TX_ERR will be generated once stopped.
  * @retval 0 Stopping the transmission.
+ * @retval -EACCES @p user is not currently active.
  */
 int uart_cobs_tx_stop(const struct uart_cobs_user *user);
 
@@ -202,6 +208,7 @@ int uart_cobs_tx_stop(const struct uart_cobs_user *user);
  * @brief Start reception of up to @p len bytes of data.
  * @param len Length of data to receive (unencoded).
  * @retval 0 Successfully started reception.
+ * @retval -EACCES @p user is not currently active.
  * @retval -EBUSY Reception already started. 
  */
 int uart_cobs_rx_start(const struct uart_cobs_user *user, size_t len);
@@ -209,19 +216,24 @@ int uart_cobs_rx_start(const struct uart_cobs_user *user, size_t len);
 /**
  * @brief Stop ongoing reception.
  * @details The reception is aborted asynchronously. An event with type
- *          @ref UART_COBS_EVT_RX_END will be generated once stopped.
+ *          @ref UART_COBS_EVT_RX_ERR will be generated once stopped.
  * @retval 0 Stopping the reception.
+ * @retval -EACCES @p user is not currently active.
  */
 int uart_cobs_rx_stop(const struct uart_cobs_user *user);
 
 /**
  * @brief Start RX timeout.
  * @param timeout Timeout in milliseconds.
+ * @retval 0 Started timeout.
+ * @retval -EACCES @p user is not currently active.
  */
 int uart_cobs_rx_timeout_start(const struct uart_cobs_user *user, int timeout);
 
 /**
  * @brief Stop RX timeout.
+ * @retval 0 Stopped any ongoing timeout.
+ * @retval -EACCES @p user is not currently active.
  */
 int uart_cobs_rx_timeout_stop(const struct uart_cobs_user *user);
 

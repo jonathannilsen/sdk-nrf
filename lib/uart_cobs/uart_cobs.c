@@ -44,7 +44,8 @@ static void no_evt_handle(const struct uart_cobs_user *user,
 
 enum op_status {
 	STATUS_OFF	= 0,
-	STATUS_ON	= 1
+	STATUS_ON	= 1,
+	STATUS_PROCESS  = 2
 };
 
 struct {
@@ -56,6 +57,7 @@ struct {
 	} tx;
 	struct {
 		atomic_t status;
+		bool resume;
 		bool processing;
 		struct k_timer timer;
 		struct cobs_dec decoder;
@@ -180,7 +182,6 @@ static bool user_sw_ready(void)
 	return ready;
 }
 
-/* TODO: set TX len to 0 */
 static void user_sw_finish(void)
 {
 	LOG_DBG_DEV("User end: %lu",
@@ -279,7 +280,6 @@ static void rx_resume(void)
 
 static void rx_process(void)
 {
-	int ret = 0;
 	const uint8_t *buf = &state.rx.raw.buf[state.rx.raw.offset];
 	struct uart_cobs_evt evt;
 
@@ -287,38 +287,24 @@ static void rx_process(void)
 	evt.data.rx.buf = state.rx.decoded_buf;
 
 	for (size_t i = 0; i < state.rx.raw.len; i++) {
-		ret = cobs_decode_step(&state.rx.decoder, buf[i]);
-		if (ret == -EINPROGRESS) {
+		int ret = cobs_decode_step(&state.rx.decoder, buf[i]);
+		if (ret < 0) {
+			/* Frame incomplete or erroneous. */
 			continue;
-		} else if (ret < 0) {
-			LOG_DBG_DEV("COBS decode error (%d)", ret);
-			break;
 		}
-		LOG_DBG_DEV("RX PDU event");
+
+		/* Clear the RX state in the case that uart_cobs_rx_start()
+		   was called. */
+		atomic_set(&state.rx.status, STATUS_PROCESS);
+
 		evt.data.rx.len = ret;
 		send_evt(&evt);
 
 		if (!state.rx.processing) {
 			/* Processing was aborted due to session switch. */
-			ret = -ECANCELED;
+			cobs_dec_reset(&state.rx.decoder);
 			break;
-		} else if (atomic_get(&state.rx.status) == STATUS_ON) {
-			/* uart_cobs_rx_start() was called in event handler. */
-			ret = -EAGAIN;
 		}
-	}
-
-	state.rx.processing = false;
-	if (ret < 0 && ret != -EINPROGRESS && ret != -EAGAIN) {
-		LOG_DBG_DEV("RX processing aborted");
-	} else {
-		LOG_DBG_DEV("RX processing finished");
-		if (ret == -EINPROGRESS) {
-			LOG_DBG_DEV("RX PDU incomplete");
-		}
-	}
-	if (ret < 0) {
-		rx_resume();
 	}
 }
 
@@ -326,23 +312,27 @@ static void rx_dis_process(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	atomic_val_t status = atomic_set(&state.rx.status, STATUS_OFF);
+	atomic_val_t status = atomic_set(&state.rx.status, STATUS_PROCESS);
 
-	if (status == STATUS_ON) {
-		if (state.rx.processing) {
-			rx_process();
-		}
+	if (status == STATUS_ON && state.rx.processing) {
+		rx_process();
 	} else if (status == -EAGAIN) {
-		/* Malformed data. Reset and resume reception. */
-		(void) atomic_set(&state.rx.status, STATUS_ON);
-		state.rx.processing = false;
+		/* Bit-level error or buffer overrun.
+		   Reset and resume reception. */
 		cobs_dec_reset(&state.rx.decoder);
-		rx_resume();
-	} else {
+		state.rx.resume = true;
+	} else if (status < 0) {
 		/* Fatal error. */
 		LOG_DBG_DEV("RX stopped with error: %d", status);
-		state.rx.processing = false;
 		send_evt_err(UART_COBS_EVT_RX_ERR, status);
+	}
+
+	state.rx.processing = false;
+	status = atomic_get(&state.rx.status);
+	if (status == STATUS_ON) {
+		rx_resume();
+	} else {
+		(void) atomic_set(&state.rx.status, STATUS_OFF);
 	}
 }
 
@@ -350,9 +340,9 @@ static void tx_dis_process(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	atomic_val_t status = atomic_set(&state.tx.status, STATUS_OFF);
 	size_t len = state.tx.len;
 	state.tx.len = 0;
+	atomic_val_t status = atomic_set(&state.tx.status, STATUS_OFF);
 
 	if (status < 0) {
 		LOG_DBG_DEV("TX stopped with error %d", status);
@@ -639,9 +629,13 @@ int uart_cobs_rx_start(const struct uart_cobs_user *user, size_t len)
 		return -EINVAL;
 	}
 	if (!atomic_cas(&state.rx.status, STATUS_OFF, STATUS_ON)) {
-		LOG_DBG_DEV("RX was already started");
-		return -EBUSY;
+		if (!atomic_cas(&state.rx.status, STATUS_PROCESS, STATUS_ON)) {
+			LOG_DBG_DEV("RX was already started");
+			return -EBUSY;
+		}
 	}
+
+	state.rx.expected_len = COBS_ENCODED_SIZE(len);
 
 	/* Generally, do not start RX during buffer processing. */
 	if (!state.rx.processing) {
@@ -658,7 +652,6 @@ int uart_cobs_rx_start(const struct uart_cobs_user *user, size_t len)
 		return -EBUSY;
 	}
 
-	state.rx.expected_len = COBS_ENCODED_SIZE(len);
 	return 0;
 }
 
