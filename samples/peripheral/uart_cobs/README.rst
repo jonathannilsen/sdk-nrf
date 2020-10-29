@@ -10,8 +10,8 @@ Overview
 ********
 
 The sample implements a simple two-way communication between two devices.
-Pressing a button on the development board causes that device to send "PING" over UART.
-After receiving "PING", the other device responds with "PONG".
+Pressing a button on the development board causes that device to send a COBS-encoded message containing the string "PING" over UART.
+After receiving "PING", the other device responds with a COBS-encoded message containing the string "PONG".
 
 Requirements
 ************
@@ -26,7 +26,7 @@ Requirements
    :rows: nrf9160dk_nrf9160ns
 
 * If using two :ref:`nRF52840 DK <ug_nrf52>`, the UART pins for each board must be wired together externally using the GPIO pins.
-  Check the configuration for each board for information about which pins are used.
+  Check the configuration for information about which pins are used.
 * If using one :ref:`nRF9160 DK <ug_nrf9160>`, the on-board devices are connected internally, so no external wiring is required.
 
 User interface

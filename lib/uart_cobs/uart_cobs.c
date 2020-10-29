@@ -8,6 +8,7 @@
 
 #define UART_COBS_DT DT_CHOSEN(nordic_cobs_uart_controller)
 
+/* Compile-time checks for correct configuration. */
 #if !DT_NODE_EXISTS(UART_COBS_DT)
 #error "Missing /chosen devicetree node: nordic,cobs-uart-controller"
 
@@ -201,9 +202,9 @@ static void user_sw_finish(void)
 static int user_sw_prepare(const struct uart_cobs_user *from,
 			   const struct uart_cobs_user *to, int err)
 {
-	/* Switch between sessions by passing through a temporary "SW" session
-	 * where RX/TX can be stopped and residual events can be safely caught
-	 * without interfering with normal sessions.
+	/* Switch between sessions by passing through a temporary "switch"
+	 * session where RX/TX can be stopped and residual events can be safely
+	 * caught without interfering with normal sessions.
 	 */
 
 	if (!atomic_ptr_cas((atomic_ptr_t) &state.user.current,

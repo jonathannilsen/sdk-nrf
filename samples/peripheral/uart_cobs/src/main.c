@@ -55,6 +55,7 @@ static struct k_poll_signal sig_gpio = K_POLL_SIGNAL_INITIALIZER(sig_gpio);
 
 #endif // CONFIG_BOARD_NRF9160DK_NRF52840
 
+
 static void log_error(const char *op, enum uart_cobs_err err)
 {
 	switch (err) {
@@ -81,7 +82,7 @@ static bool user_start(struct user_info *info)
 	return err == 0;
 }
 
-/* Handler for UART COBS events in the PING/PONG states */
+/* Handler for UART COBS events in the idle state. */
 static void cobs_idle_evt_handler(const struct uart_cobs_user *user,
 				  const struct uart_cobs_evt *evt)
 {
@@ -123,7 +124,7 @@ static void cobs_idle_evt_handler(const struct uart_cobs_user *user,
 	}
 }
 
-/* Handler for UART COBS events in the PING/PONG states */
+/* Handler for UART COBS events in the PING/PONG states. */
 static void cobs_user_evt_handler(const struct uart_cobs_user *user,
 				  const struct uart_cobs_evt *evt)
 {
