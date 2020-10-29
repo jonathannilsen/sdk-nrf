@@ -49,7 +49,7 @@ enum op_status {
 };
 
 struct {
-	struct device *dev;
+	const struct device *dev;
 	struct {
 		atomic_t status;
 		struct cobs_enc_buf buf;
@@ -412,7 +412,7 @@ static void uart_rx_disabled_handle(void)
 	k_work_submit_to_queue(&state.work.q, &state.work.rx_dis);
 }
 
-static void uart_async_cb(struct device *dev,
+static void uart_async_cb(const struct device *dev,
 			  struct uart_event *evt,
 			  void *user_data)
 {
@@ -447,7 +447,7 @@ static void uart_async_cb(struct device *dev,
 	}
 }
 
-static int uart_cobs_sys_init(struct device *dev)
+static int uart_cobs_sys_init(const struct device *dev)
 {
 	ARG_UNUSED(dev);
 

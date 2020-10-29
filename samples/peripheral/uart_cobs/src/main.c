@@ -47,7 +47,7 @@ static struct user_info user_pong = {
 
 #ifndef CONFIG_BOARD_NRF9160DK_NRF52840
 
-static struct device *gpiob;
+static const struct device *gpiob;
 static struct gpio_callback gpio_cb;
 
 static struct k_poll_signal sig_ready = K_POLL_SIGNAL_INITIALIZER(sig_ready);
@@ -193,7 +193,7 @@ static void cobs_user_evt_handler(const struct uart_cobs_user *user,
 
 #ifndef CONFIG_BOARD_NRF9160DK_NRF52840
 
-static void button_handler(struct device *gpiob, struct gpio_callback *cb,
+static void button_handler(const struct device *gpiob, struct gpio_callback *cb,
 			uint32_t pins)
 {
 	if (pins == BIT(DT_GPIO_PIN(DT_ALIAS(sw0), gpios))) {
