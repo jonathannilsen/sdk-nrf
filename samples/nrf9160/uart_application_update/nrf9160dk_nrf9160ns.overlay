@@ -1,0 +1,22 @@
+/ {
+	chosen {
+		nordic,cobs-uart-controller=&uart2;
+	};
+};
+
+/* uart0 is used for VCOM0 communication. */
+&uart0 {
+	current-speed = <115200>; 
+};
+
+/* uart2 is used for nRF52840 communication. */
+&uart2 {
+	compatible = "nordic,nrf-uarte";
+	current-speed = <1000000>; 
+	status = "okay";
+	tx-pin = <18>;
+	rx-pin = <17>;
+	rts-pin = <21>;
+	cts-pin = <19>;
+	hw-flow-control;
+};

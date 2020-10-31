@@ -1,0 +1,30 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "HTTP/UART application update sample"
+
+config DOWNLOAD_HOST
+	string "Download host name"
+
+config DOWNLOAD_NRF91_FILE
+	string "The file name of the nRF91 firmware image."
+
+config DOWNLOAD_NRF52_FILE
+	string "The file name of the nRF52 firmware image."
+
+config APPLICATION_VERSION
+	int "Application version"
+	default 1
+
+config USE_HTTPS
+	bool
+	prompt "Use HTTPS for download"
+
+endmenu
+
+menu "Zephyr Kernel"
+source "Kconfig.zephyr"
+endmenu

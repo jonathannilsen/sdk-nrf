@@ -59,6 +59,20 @@ When the complete transfer is done, call the :c:func:`dfu_target_done` function 
 On the next reboot, the modem will to try to apply the patch.
 
 
+Firmware upgrades over UART
+===========================
+
+This type of firmware upgrade sends a specially prepared MCUboot or modem firmware image over UART to another device.
+In other words, it does not update the device itself but rather another device that is connected via UART.
+The image is sent using :ref:`lib_uart_blob_tx`.
+Each of the API functions send a message to the remote device containing the parameters passed to the API function - see :ref:`lib_uart_blob_tx` for more information.
+
+UART DFU firmware upgrades consist of a regular MCUboot or modem firmware image that is prepended with a byte sequence.
+This byte sequence is removed by :cpp:func:`dfu_target_write` before sending the image, so that a regular firmware image is sent over UART.
+
+See :ref:`lib_uart_dfu_host` for how to *receive* device firmware upgrades over UART, as well as how to generate firmware images for UART DFU.
+
+
 Configuration
 *************
 
@@ -66,8 +80,9 @@ You can disable support for specific DFU targets with the following parameters:
 
 * :option:`CONFIG_DFU_TARGET_MCUBOOT`
 * :option:`CONFIG_DFU_TARGET_MODEM`
+* :option:`CONFIG_DFU_TARGET_UART`
 
-By default, all DFU targets are enabled, but you can only select the targets that are supported by your device and application.
+By default, the MCUboot and modem targets are enabled, but you can only select the targets that are supported by your device and application.
 
 
 API documentation
