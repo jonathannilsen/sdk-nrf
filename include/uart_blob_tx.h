@@ -38,8 +38,9 @@ struct uart_blob_tx_cb {
 	/**
 	 * @brief Signal receiver response to @ref uart_blob_tx_send_write.
 	 * @param[in] status Status code returned by the receiver.
+	 * @param[in] len Length of fragment written.
 	 */
-	void (*write_cb)(int status);
+	void (*write_cb)(int status, size_t len);
 
 	/**
 	 * @brief Signal receiver response to @ref uart_blob_tx_send_done.
@@ -51,7 +52,7 @@ struct uart_blob_tx_cb {
 	 * @brief Callback to signal UART BLOB sender protocol event.
 	 * @param[in] evt Client protocol event.
 	 */
-	void (*evt_cb)(const struct uart_blob_evt *const evt);
+	void (*evt_cb)(const struct uart_blob_evt *evt);
 };
 
 /**
@@ -96,7 +97,7 @@ int uart_blob_tx_send_init(size_t blob_len);
  * @retval -ENOMEM If @p len given was too large.
  * @retval -EBUSY If unable to start the transmission.
  */
-int uart_blob_tx_send_write(const uint8_t *const buf, size_t len);
+int uart_blob_tx_send_write(const uint8_t *buf, size_t len);
 
 /**
  * @brief Request BLOB offset from the remote receiver.

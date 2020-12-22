@@ -61,7 +61,7 @@ struct uart_blob_rx_cb {
 	 * @brief Callback to signal UART BLOB receiver protocol event.
 	 * @param[in] evt Receiver protocol event.
 	 */
-	void (*evt_cb)(const struct uart_blob_evt *const evt);
+	void (*evt_cb)(const struct uart_blob_evt *evt);
 };
 
 /**
