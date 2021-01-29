@@ -214,6 +214,17 @@ if(CONFIG_BOOTLOADER_MCUBOOT)
       "version_MCUBOOT=${CONFIG_MCUBOOT_IMAGE_VERSION}"
       )
 
+    # -------------------------------- #
+    include(${ZEPHYR_BASE}/../nrf/cmake/validate_file_size.cmake)
+
+    math(EXPR update_bin_max_size
+      "$<TARGET_PROPERTY:partition_manager,PM_MCUBOOT_PRIMARY_SIZE>")
+    add_file_size_validation(mcuboot_sign_target
+      "${PROJECT_BINARY_DIR}/app_update.bin"
+      "$<TARGET_PROPERTY:partition_manager,PM_MCUBOOT_PRIMARY_SIZE>"
+      )
+    # -------------------------------- #
+
     if (CONFIG_NRF53_UPGRADE_NETWORK_CORE
         AND CONFIG_HCI_RPMSG_BUILD_STRATEGY_FROM_SOURCE)
       # Network core application updates are enabled.
