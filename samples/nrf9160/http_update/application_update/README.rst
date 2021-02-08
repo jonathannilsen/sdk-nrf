@@ -15,7 +15,11 @@ Overview
 
 The sample connects to an HTTP server to download a signed firmware image.
 The image is generated when building the sample, but you must upload it to a server and configure where it can be downloaded.
-See `Specifying the image file`_ for more information.
+
+The sample uses *two* firmware images, one having application version 1 and the other application version 2.
+The sample updates between the two images: **version 1** -> **version 2** and **version 2** -> **version 1**.
+
+See `Specifying the image files`_ for more information.
 
 By default, the image is saved to the `MCUboot`_ bootloader secondary slot.
 To be used by MCUboot, the downloaded image must be signed using imgtool.
@@ -29,8 +33,8 @@ The sample supports the following development kit:
    :header: heading
    :rows: nrf9160dk_nrf9160ns
 
-The sample also requires a signed firmware image that is available for download from an HTTP server.
-This image is automatically generated when building the application.
+The sample also requires one or two signed firmware images that are available for download from an HTTP server.
+An image file is automatically generated each time the application is built.
 
 .. include:: /includes/spm.txt
 
@@ -45,17 +49,22 @@ The sample is built as a non-secure firmware image for the nrf9160dk_nrf9160ns b
 Because of this, it automatically includes the :ref:`secure_partition_manager`.
 The sample also uses MCUboot, which is automatically built and merged into the final HEX file when building the sample.
 
-Specifying the image file
-=========================
+Specifying the image files
+==========================
 
-Before building the sample, you must specify where the image file will be located.
-If you do not want to host it yourself, you can upload it to a public S3 bucket on Amazon Web Services (AWS).
+Before building the sample, you must specify where the image files will be located.
+If you do not want to host the files yourself, you can upload them to a public S3 bucket on Amazon Web Services (AWS).
 See `Setting up an AWS S3 bucket`_ for instructions.
+
+Note that there are two options that configure the names of the update image files:
+
+- ``CONFIG_DOWNLOAD_FILE_DOWNGRADE`` should be set to the version 1 update image file name.
+- ``CONFIG_DOWNLOAD_FILE`` should be set to the version 2 update image file name.
 
 To specify the location in |SES|:
 
 1. Select :guilabel:`Project` -> :guilabel:`Configure nRF Connect SDK Project`.
-#. Navigate to :guilabel:`HTTP application update sample` and specify the download hostname (``CONFIG_DOWNLOAD_HOST``) and the file to download (``CONFIG_DOWNLOAD_FILE``).
+#. Navigate to :guilabel:`HTTP application update sample` and specify the download hostname (``CONFIG_DOWNLOAD_HOST``) and the files to download (``CONFIG_DOWNLOAD_FILE`` and ``CONFIG_DOWNLOAD_FILE_DOWNGRADE``).
 #. Click :guilabel:`Configure` to save the configuration.
 
 .. include:: /includes/aws_s3_bucket.txt
@@ -69,21 +78,25 @@ Hosting your image on an AWS S3 Server
    It is located in the :file:`zephyr` subfolder of your build directory.
 #. Click the file you uploaded in the bucket and check the :guilabel:`Object URL` field to find the download URL for the file.
 
-When specifying the image file, use the ``<bucket-name>.s3.<region>.amazonaws.com`` part of the URL for the download hostname.
+When specifying the image files, use the ``<bucket-name>.s3.<region>.amazonaws.com`` part of the URL for the download hostname.
 Make sure to not include ``https``.
 Specify the file name as the remaining part of the URL.
+
+Use the above steps to upload each of the two images.
 
 Testing
 =======
 
 After programming the sample to your development kit, test it by performing the following steps:
 
-1. Configure the application version to be 2.
+1. Upload the file :file:`app_update.bin` with application version 1 to the server you have chosen.
+   To upload the file on nRF Connect for Cloud, click :guilabel:`Upload` for the firmware URL that you generated earlier.
+   Then select the file :file:`app_update.bin` and upload it.
+   Remember to rename the file to match the ``CONFIG_DOWNLOAD_FILE_DOWNGRADE`` configuration.
+#. Configure the application version to be 2.
    To do so, either change ``CONFIG_APPLICATION_VERSION`` to 2 in the :file:`prj.conf` file, or select :guilabel:`Project` -> :guilabel:`Configure nRF Connect SDK Project` -> :guilabel:`HTTP application update sample` in |SES| and change the value for :guilabel:`Application version`.
    Then rebuild the application.
-#. Upload the file :file:`update.bin` to the server you have chosen.
-   To upload the file on nRF Connect for Cloud, click :guilabel:`Upload` for the firmware URL that you generated earlier.
-   Then select the file :file:`update.bin` and upload it.
+#. Upload the file :file:`app_update.bin` with application version 2 to the server you have chosen.
 #. Reset your nRF9160 DK to start the application.
 #. Open a terminal emulator and observe that an output similar to this is printed:
 
@@ -100,6 +113,10 @@ After programming the sample to your development kit, test it by performing the 
    This can take up to a minute and nothing is printed in the terminal while this is processing.
 #. Observe that **LED 1** and **LED 2** is lit.
    This indicates that version 2 or higher of the application is running.
+#. You can now downgrade the application by repeating the button presses above.
+   Observe that after the second update only **LED 1** is lit.
+   This indicates that the application has been downgraded to version 1.
+   Any further updates will toggle between the versions.
 
 Dependencies
 ************
