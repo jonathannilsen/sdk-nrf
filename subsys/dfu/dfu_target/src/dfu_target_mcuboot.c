@@ -18,11 +18,11 @@
 
 #include <zephyr.h>
 #include <pm_config.h>
+#include <storage/stream_flash.h>
 #include <logging/log.h>
 #include <nrfx.h>
 #include <dfu/mcuboot.h>
 #include <dfu/dfu_target.h>
-#include <dfu/dfu_target_stream.h>
 
 LOG_MODULE_REGISTER(dfu_target_mcuboot, CONFIG_DFU_TARGET_LOG_LEVEL);
 
@@ -31,6 +31,7 @@ LOG_MODULE_REGISTER(dfu_target_mcuboot, CONFIG_DFU_TARGET_LOG_LEVEL);
 #define MCUBOOT_SECONDARY_LAST_PAGE_ADDR                                       \
 	(PM_MCUBOOT_SECONDARY_ADDRESS + PM_MCUBOOT_SECONDARY_SIZE - 1)
 
+static struct stream_flash_ctx stream;
 static uint8_t *stream_buf;
 static size_t stream_buf_len;
 
@@ -118,16 +119,11 @@ int dfu_target_mcuboot_init(size_t file_size, dfu_target_callback_t cb)
 		return -EFAULT;
 	}
 
-	err = dfu_target_stream_init(&(struct dfu_target_stream_init){
-		.id = "MCUBOOT",
-		.fdev = flash_dev,
-		.buf = stream_buf,
-		.len = stream_buf_len,
-		.offset = PM_MCUBOOT_SECONDARY_ADDRESS,
-		.size = PM_MCUBOOT_SECONDARY_SIZE,
-		.cb = NULL });
+	err = stream_flash_init(&stream, flash_dev, stream_buf, stream_buf_len,
+				PM_MCUBOOT_SECONDARY_ADDRESS,
+				PM_MCUBOOT_SECONDARY_SIZE, NULL, "MCUBOOT");
 	if (err < 0) {
-		LOG_ERR("dfu_target_stream_init failed %d", err);
+		LOG_ERR("stream_flash_init failed %d", err);
 		return err;
 	}
 
@@ -136,26 +132,34 @@ int dfu_target_mcuboot_init(size_t file_size, dfu_target_callback_t cb)
 
 int dfu_target_mcuboot_offset_get(size_t *out)
 {
-	return dfu_target_stream_offset_get(out);
+	*out = stream_flash_bytes_written(&stream);
+
+	return 0;
 }
 
 int dfu_target_mcuboot_write(const void *const buf, size_t len)
 {
-	return dfu_target_stream_write(buf, len);
+	int err = stream_flash_buffered_write(&stream, buf, len, false);
+	
+	if (err != 0) {
+		LOG_ERR("stream_flash_buffered_write error %d", err);
+		return err;
+	}
+
+	return err;
 }
 
 int dfu_target_mcuboot_done(bool successful)
 {
 	int err = 0;
 
-	err = dfu_target_stream_done(successful);
-	if (err != 0) {
-		LOG_ERR("dfu_target_stream_done error %d", err);
-		return err;
-	}
-
 	if (successful) {
-		err = stream_flash_erase_page(dfu_target_stream_get_stream(),
+		err = stream_flash_finish(&stream, true);
+		if (err != 0) {
+			LOG_ERR("stream_flash_finish error %d", err);
+			return err;
+		}
+		err = stream_flash_erase_page(&stream,
 					      MCUBOOT_SECONDARY_LAST_PAGE_ADDR);
 		if (err != 0) {
 			LOG_ERR("Unable to delete last page: %d", err);

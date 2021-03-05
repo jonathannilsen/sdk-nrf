@@ -37,11 +37,10 @@ if DFU_TARGET_MCUBOOT_SAVE_PROGRESS
 	comment "DFU_TARGET_MCUBOOT_SAVE_PROGRESS is deprecated, please use DFU_TARGET_STREAM_SAVE_PROGRESS instead"
 endif
 
-config DFU_TARGET_STREAM_SAVE_PROGRESS
+config DFU_TARGET_STREAM_SAVE_PROGRESS  # FIXME: can be removed
 	bool "Store write progress to flash stream"
 	depends on DFU_TARGET_STREAM || ZTEST # ZTEST for testing purposes
-	depends on SETTINGS
-	depends on !SETTINGS_NONE
+	depends on STREAM_FLASH_SAVE_PROGRESS
 	help
 	  Enable this option to cause dfu_target_stream to store the current
 	  write progress to flash. In case of power failure or device reset,

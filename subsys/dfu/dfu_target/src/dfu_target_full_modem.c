@@ -6,15 +6,16 @@
 
 #include <zephyr.h>
 #include <drivers/flash.h>
+#include <storage/stream_flash.h>
 #include <logging/log.h>
 #include <dfu/dfu_target.h>
-#include <dfu/dfu_target_stream.h>
 #include <dfu/dfu_target_full_modem.h>
 
 LOG_MODULE_REGISTER(dfu_target_full_modem, CONFIG_DFU_TARGET_LOG_LEVEL);
 
 #define FULL_MODEM_HEADER_MAGIC 0x84d2
 
+static struct stream_flash_ctx stream;
 static bool configured;
 
 bool dfu_target_full_modem_identify(const void *const buf)
@@ -26,16 +27,11 @@ int dfu_target_full_modem_cfg(const struct dfu_target_full_modem_params *params)
 {
 	int err;
 
-	err = dfu_target_stream_init(
-		&(struct dfu_target_stream_init){ .id = "DFU_FULL_MODEM",
-						  .buf = params->buf,
-						  .len = params->len,
-						  .fdev = params->dev->dev,
-						  .offset = params->dev->offset,
-						  .size = params->dev->size,
-						  .cb = NULL });
+	err = stream_flash_init(&stream, params->dev->dev, params->buf,
+				params->len, params->dev->offset,
+				params->dev->size, NULL, "DFU_FULL_MODEM");
 	if (err < 0) {
-		LOG_ERR("dfu_target_stream_init failed %d", err);
+		LOG_ERR("stream_flash_init failed %d", err);
 		return err;
 	}
 
@@ -56,12 +52,21 @@ int dfu_target_full_modem_init(size_t file_size,
 
 int dfu_target_full_modem_offset_get(size_t *out)
 {
-	return dfu_target_stream_offset_get(out);
+	*out = stream_flash_bytes_written(&stream);
+
+	return 0;
 }
 
 int dfu_target_full_modem_write(const void *const buf, size_t len)
 {
-	return dfu_target_stream_write(buf, len);
+	int err = stream_flash_buffered_write(&stream, buf, len, false);
+
+	if (err != 0) {
+		LOG_ERR("stream_flash_buffered_write error %d", err);
+		return err;
+	}
+
+	return err;
 }
 
 int dfu_target_full_modem_done(bool successful)
@@ -70,7 +75,8 @@ int dfu_target_full_modem_done(bool successful)
 
 	if (successful) {
 		LOG_INF("Modem firmware downloaded to flash device");
+		return stream_flash_finish(&stream, true);
 	}
 
-	return dfu_target_stream_done(successful);
+	return 0;
 }
