@@ -11,9 +11,6 @@ zephyr_library_sources(
   src/dfu_target.c
   )
 
-zephyr_library_sources_ifdef(CONFIG_DFU_TARGET_STREAM
-  src/dfu_target_stream.c
-  )
 zephyr_library_sources_ifdef(CONFIG_DFU_TARGET_MODEM_DELTA
   src/dfu_target_modem_delta.c
   )

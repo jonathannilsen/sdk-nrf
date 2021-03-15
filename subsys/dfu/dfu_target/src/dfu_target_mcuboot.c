@@ -18,7 +18,7 @@
 
 #include <zephyr.h>
 #include <pm_config.h>
-#include <storage/stream_flash.h>
+#include <storage/stream_flash_nv.h>
 #include <logging/log.h>
 #include <nrfx.h>
 #include <dfu/mcuboot.h>
@@ -31,9 +31,15 @@ LOG_MODULE_REGISTER(dfu_target_mcuboot, CONFIG_DFU_TARGET_LOG_LEVEL);
 #define MCUBOOT_SECONDARY_LAST_PAGE_ADDR                                       \
 	(PM_MCUBOOT_SECONDARY_ADDRESS + PM_MCUBOOT_SECONDARY_SIZE - 1)
 
-static struct stream_flash_ctx stream;
+static struct stream_flash_nv_ctx stream;
 static uint8_t *stream_buf;
 static size_t stream_buf_len;
+
+#ifdef CONFIG_DFU_TARGET_SAVE_PROGRESS
+static const char *stream_id = "MCUBOOT";
+#else
+static const char *stream_id = NULL;
+#endif
 
 int dfu_ctx_mcuboot_set_b1_file(const char *file, bool s0_active,
 				const char **update)
@@ -119,11 +125,11 @@ int dfu_target_mcuboot_init(size_t file_size, dfu_target_callback_t cb)
 		return -EFAULT;
 	}
 
-	err = stream_flash_init(&stream, flash_dev, stream_buf, stream_buf_len,
-				PM_MCUBOOT_SECONDARY_ADDRESS,
-				PM_MCUBOOT_SECONDARY_SIZE, NULL, "MCUBOOT");
+	err = stream_flash_nv_init(&stream, flash_dev, stream_buf,
+				   stream_buf_len, PM_MCUBOOT_SECONDARY_ADDRESS,
+				   PM_MCUBOOT_SECONDARY_SIZE, NULL, stream_id);
 	if (err < 0) {
-		LOG_ERR("stream_flash_init failed %d", err);
+		LOG_ERR("stream_flash_nv_init failed %d", err);
 		return err;
 	}
 
@@ -132,17 +138,17 @@ int dfu_target_mcuboot_init(size_t file_size, dfu_target_callback_t cb)
 
 int dfu_target_mcuboot_offset_get(size_t *out)
 {
-	*out = stream_flash_bytes_written(&stream);
+	*out = stream_flash_nv_bytes_written(&stream);
 
 	return 0;
 }
 
 int dfu_target_mcuboot_write(const void *const buf, size_t len)
 {
-	int err = stream_flash_buffered_write(&stream, buf, len, false);
-	
+	int err = stream_flash_nv_buffered_write(&stream, buf, len, false);
+
 	if (err != 0) {
-		LOG_ERR("stream_flash_buffered_write error %d", err);
+		LOG_ERR("stream_flash_nv_buffered_write error %d", err);
 		return err;
 	}
 
@@ -154,13 +160,23 @@ int dfu_target_mcuboot_done(bool successful)
 	int err = 0;
 
 	if (successful) {
-		err = stream_flash_finish(&stream, true);
+		/* Flush write buffer to flash. */
+		err = stream_flash_nv_buffered_write(&stream, NULL, 0, true);
 		if (err != 0) {
-			LOG_ERR("stream_flash_finish error %d", err);
+			LOG_ERR("Unable to flush write buffer: %d", err);
 			return err;
 		}
-		err = stream_flash_erase_page(&stream,
-					      MCUBOOT_SECONDARY_LAST_PAGE_ADDR);
+	}
+
+	err = stream_flash_nv_finish(&stream, successful);
+	if (err != 0) {
+		LOG_ERR("stream_flash_nv_finish error %d", err);
+		return err;
+	}
+
+	if (successful) {
+		err = stream_flash_nv_erase_page(&stream,
+			MCUBOOT_SECONDARY_LAST_PAGE_ADDR);
 		if (err != 0) {
 			LOG_ERR("Unable to delete last page: %d", err);
 			return err;
