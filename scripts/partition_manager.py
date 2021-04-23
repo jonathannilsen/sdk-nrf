@@ -628,12 +628,14 @@ def set_sub_partition_address_and_size(reqs, sub_partitions):
         address = min([reqs[part]['address'] for part in sp_value['span']])
 
         reqs[sp_name] = sp_value
-        span = [p for p in reqs[sp_name]['orig_span']] 
         if 'empty' in reqs[sp_name]:
             # Add generated empty partitions to the span original span
+            span = [p for p in reqs[sp_name]['orig_span']] 
             span.extend(reqs[sp_name]['empty'])
             del reqs[sp_name]['empty']
-        reqs[sp_name]['span'] = span  
+            reqs[sp_name]['span'] = span
+        else:
+            reqs[sp_name]['span'] = reqs[sp_name]['orig_span']
         set_size_addr(reqs[sp_name], size, address)
 
 
