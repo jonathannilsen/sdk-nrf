@@ -454,15 +454,20 @@ def _set_addresses_and_align(reqs, sub_partitions, solution, size, start, dynami
 
 
 def add_to_parent_spans(partition, current, move_up, sub_partitions, solution):
-    parent_spans = [d['span'] for d in sub_partitions.values() if current in d['span']]
-    for parent_span in parent_spans:
+    # Use 'orig_span' here since the spans have been flattened
+    parents = [(p, d['orig_span']) for p, d in sub_partitions.items() if current in d['orig_span']]
+    for parent, parent_span in parents:
         # Sort the partitions in the parent span by their actual placements.
         sorted_span = [p for p in solution if p in parent_span]
         child_index = sorted_span.index(current)
         part_index = child_index if move_up else child_index + 1
         # Only add the partition if it is not at the edge of the span - this leaves the span size unchanged.
         if 0 < part_index < len(sorted_span):
-            parent_span.append(partition)
+            if 'empty' not in sub_partitions[parent]:
+                sub_partitions[parent]['empty'] = [partition]
+            else:
+                sub_partitions[parent]['empty'].append(partition)
+            sub_partitions[parent]['span'].append(partition)
 
 
 def align_if_required(i, dynamic_partitions, move_up, reqs, sub_partitions, dp, solution):
@@ -623,7 +628,12 @@ def set_sub_partition_address_and_size(reqs, sub_partitions):
         address = min([reqs[part]['address'] for part in sp_value['span']])
 
         reqs[sp_name] = sp_value
-        reqs[sp_name]['span'] = reqs[sp_name]['orig_span']  # Restore "backup".
+        span = [p for p in reqs[sp_name]['orig_span']] 
+        if 'empty' in reqs[sp_name]:
+            # Add generated empty partitions to the span original span
+            span.extend(reqs[sp_name]['empty'])
+            del reqs[sp_name]['empty']
+        reqs[sp_name]['span'] = span  
         set_size_addr(reqs[sp_name], size, address)
 
 
@@ -973,6 +983,9 @@ def main():
             print(yaml.dump(to_print))
             sys.exit(1)
 
+    print("Solution:")
+    for k, v in solution.items():
+        print(k, v)
     write_yaml_out_file(solution, args.output_partitions)
     write_yaml_out_file(regions, args.output_regions)
 
@@ -1755,6 +1768,24 @@ def test():
         failed = True
     assert failed
 
+    # Test that nested partitions being aligned are added to their parent
+    # spans as long as they are not placed at the start or end of the parent
+    td = {'level0_span': {'span': ['level1_span_a', 'level1_span_b']},
+          'level1_span_a': {'span': ['subpart_a', 'subpart_b', 'subpart_c']},
+          'level1_span_b': {'span': ['subpart_b', 'subpart_c', 'subpart_d']},
+          'subpart_a': {'size': 120, 'placement': {'before': 'subpart_b'}},
+          'subpart_b': {'size': 120, 'placement': {'before': 'subpart_c', 'align': {'start': 100}}}, # 'align': {'start': 100}},
+          'subpart_c': {'size': 120, 'placement': {'before': 'subpart_d', 'align': {'start': 100}}}, # 'align': {'end': 100}},
+          'subpart_d': {'size': 120, 'placement': {'before': 'app', 'align': {'end': 100}}}, # 'align': {'end': 100}},
+          'app': {'region': 'flash_primary'}}
+    s, sub_partitions = resolve(td, 'app')
+    set_addresses_and_align(td, sub_partitions, s, 1000, 'app')
+    set_sub_partition_address_and_size(td, sub_partitions)
+    calculate_end_address(td)
+    print(s)
+    print(sub_partitions)
+    print(td)
+    # write_yaml_out_file(solution, args.output_partitions)
     print('All tests passed!')
 
 
