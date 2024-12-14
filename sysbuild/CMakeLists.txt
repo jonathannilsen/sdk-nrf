@@ -770,6 +770,42 @@ function(${SYSBUILD_CURRENT_MODULE_NAME}_post_cmake)
       set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BINARY_DIR}/zephyr/.config)
     endif()
   endif()
+
+  if(SB_CONFIG_SOC_SERIES_NRF54HX OR SB_CONFIG_SOC_SERIES_NRF92X)
+    find_program(NRF_REGTOOL nrf-regtool)
+
+    foreach(image ${IMAGES})
+      unset(has_uicr)
+      sysbuild_get(has_uicr IMAGE ${image} VAR CONFIG_NRF_REGTOOL_GENERATE_UICR KCONFIG)
+      if(NOT has_uicr)
+        continue()
+      endif()
+      sysbuild_get(image_BINARY_DIR IMAGE ${image} VAR APPLICATION_BINARY_DIR CACHE)
+      list(APPEND uicr_target_values "uicr-file=${image_BINARY_DIR}/zephyr/uicr.hex,name=${image}")
+    endforeach()
+
+    if(uicr_target_values)
+      string(REPEAT "-v;" ${CONFIG_NRF_REGTOOL_VERBOSITY} verbosity)
+      list(TRANSFORM uicr_target_values PREPEND "--target;" OUTPUT_VARIABLE uicr_targets)
+      set(report_file ${BINARY_DIR}/)
+
+      execute_process(
+        COMMAND
+        ${NRF_REGTOOL} ${verbosity} uicr-validate
+        ${uicr_targets}
+        --output-file ${BINARY_DIR}/zephyr/uicr_report.json
+        WORKING_DIRECTORY ${BINARY_DIR}
+        RESULT_VARIABLE validate_exit_code
+      )
+      # TODO: better error messages
+      message(STATUS "validate exit code ${validate_exit_code}")
+      if("${validate_exit_code}" STREQUAL "0")
+        message(STATUS "UICRs are OK")
+      else()
+        message(FATAL_ERROR "UICR validation failed with return code: ${validate_exit_code}")
+      endif()
+    endif()
+  endif()
 endfunction(${SYSBUILD_CURRENT_MODULE_NAME}_post_cmake)
 
 # Enable use of partition manager with sysbuild.
