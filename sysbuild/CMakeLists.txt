@@ -785,13 +785,13 @@ function(${SYSBUILD_CURRENT_MODULE_NAME}_post_cmake)
     endforeach()
 
     if(uicr_target_values)
-      string(REPEAT "-v;" ${CONFIG_NRF_REGTOOL_VERBOSITY} verbosity)
+      # string(REPEAT "-v;" ${CONFIG_NRF_REGTOOL_VERBOSITY} verbosity)
       list(TRANSFORM uicr_target_values PREPEND "--target;" OUTPUT_VARIABLE uicr_targets)
       set(report_file ${BINARY_DIR}/)
 
       execute_process(
         COMMAND
-        ${NRF_REGTOOL} ${verbosity} uicr-validate
+        ${NRF_REGTOOL} uicr-validate
         ${uicr_targets}
         --output-file ${BINARY_DIR}/zephyr/uicr_report.json
         WORKING_DIRECTORY ${BINARY_DIR}
