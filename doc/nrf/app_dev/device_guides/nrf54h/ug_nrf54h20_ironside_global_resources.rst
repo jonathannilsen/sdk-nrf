@@ -53,6 +53,8 @@ The following UICR fields are supported:
    If no UICR values are programmed, |ISE| applies a set of default configurations.
    Applications that do not require custom settings can rely on these defaults without modifying the UICR.
 
+.. _ug_nrf54h20_ironside_se_uicr_image:
+
 Generating the UICR image
 *************************
 
