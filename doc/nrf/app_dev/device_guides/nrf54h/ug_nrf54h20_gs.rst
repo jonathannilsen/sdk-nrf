@@ -166,25 +166,41 @@ To program the nRF54H20 IronSide SE binaries to the nRF54H20 DK, do the followin
 
 .. rst-class:: numbered-step
 
-Bring-up step: Transitioning the nRF54H20 SoC to RoT
-****************************************************
+Bring-up step: Transitioning the nRF54H20 SoC to DEPLOYED
+*********************************************************
 
 The current nRF54H20 DK comes with its lifecycle state (LCS) set to ``EMPTY``.
-To operate correctly, you must transition its lifecycle state to Root of Trust (``RoT``).
+To operate correctly, you must transition its lifecycle state to Root of Trust (``RoT``) or ``DEPLOYED``.
+In a development context, there is no meaningful difference between these states, however it is recommended to use the ``DEPLOYED`` state.
 
 .. note::
-   The forward transition to LCS ``RoT`` is permanent.
+   The forward transition to LCS ``RoT`` or ``DEPLOYED`` is permanent.
    After the transition, it is impossible to transition backward to LCS ``EMPTY``.
 
-To transition the LCS to ``RoT``, do the following:
+To transition the LCS to ``DEPLOYED``, do the following:
 
 1. Set the LCS of the nRF54H20 SoC to Root of Trust using the following command::
 
       nrfutil device x-adac-lcs-change --life-cycle rot --serial-number <serial_number>
 
-#. After the LCS transition, reset the device::
+#. Check the boot status of the SoC to ensure that |ISE| completed its initial boot::
 
-      nrfutil device reset --reset-kind RESET_PIN --serial-number <serial_number>
+      nrfutil device x-boot-status-get --serial-number <serial_number>
+
+   It is expected that an error is reported for the ``Application core boot`` as the application firmware has not been programmed yet.
+   Example output:
+
+   .. code-block:: console
+
+      Boot status                 Failure (0x0c0b8001)
+      IronSide SE version SEQNUM  23
+      Application core boot       Error (1)
+      Boot command                No command (0x0)
+      Boot command status         OK (0)
+
+#. Set the LCS of the nRF54H20 SoC to Deployed using the following command::
+
+      nrfutil device x-adac-lcs-change --life-cycle deployed --serial-number <serial_number>
 
 .. _ug_nrf54h20_gs_sample:
 
