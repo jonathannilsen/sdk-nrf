@@ -9,3 +9,25 @@
 		zephyr,code-partition = &boot_partition;
 	};
 };
+
+
+&cpusec_cpuapp_ipc {
+        status = "disabled";
+};
+
+&cpusec_bellboard {
+        status = "disabled";
+};
+
+/* Disable interrupt for IronSide IPC RX event.
+ * Others are kept as they are in the board defaults.
+ */
+&cpuapp_bellboard {
+        /* irq0:
+         *  - 6:  cpuapp-cpusys
+         *  - 13: cpuapp-cpuppr
+         *  - 14: cpuapp-cpuflpr
+         *  - 18: cpuapp-cpurad
+         */
+        nordic,interrupt-mapping = <0x00046040 0>;
+};
