@@ -63,6 +63,7 @@ config MCUBOOT_NRF_CLEANUP_PERIPHERAL
 config NCS_MCUBOOT_LOAD_PERIPHCONF
 	bool "Load new peripheral configuration before jumping to the application"
 	select IRONSIDE_SE_CALL
+	imply IRONSIDE_SE_CALL_MINIMAL
 	depends on HAS_IRONSIDE_SE
 	help
 	  When enabled, MCUboot looks for a TLV pointing to a slot specific list of
@@ -88,6 +89,14 @@ config NCS_MCUBOOT_LOAD_PERIPHCONF_MAX_BLOBS
 	  The maximum number of PERIPHCONF blobs loaded by MCUboot for a slot.
 
 endif
+
+config NCS_MCUBOOT_MPCCONF_STATIC_WRITE_PROTECTION
+	bool "Write protect partitions using MPCCONF"
+	select IRONSIDE_SE_CALL
+	imply IRONSIDE_SE_CALL_MINIMAL
+	depends on HAS_IRONSIDE_SE
+	help
+	  ?
 
 config BOOT_SIGNATURE_KEY_FILE
 	string "MCUBoot PEM key file"

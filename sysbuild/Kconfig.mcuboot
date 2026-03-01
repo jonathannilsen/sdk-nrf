@@ -283,6 +283,19 @@ config NCS_MCUBOOT_LOAD_PERIPHCONF
 	  the different slots. The PERIPHCONF blob pointed to by UICR.PERIPHCONF will by default
 	  only include the configuration from the MCUboot image.
 
+# TODO: how do we structure this in a way that lets us add the DFUability later?
+# At that point it might make sense to add a LOAD_MPCCONF?
+# Maybe this could then become part of a choice?
+config NCS_MCUBOOT_MPCCONF_STATIC_WRITE_PROTECTION
+	bool "Write protect partitions using MPCCONF from MCUboot [EXPERIMENTAL]"
+	depends on SOC_SERIES_NRF54H
+	select EXPERIMENTAL
+	help
+	  Write protect firmware partitions by configuring the global domain
+	  Memory Privilege Controllers (MPCs) via MPCCONF.
+
+	  TODO: explain a bit more?
+
 menu "Custom TLVs"
 	depends on NCS_MCUBOOT_LOAD_PERIPHCONF
 
