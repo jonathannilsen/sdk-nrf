@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+/*
+ * Split-slot MRAM layout variant 20/23 for idle_relocated_tcm.
+ * perm 5 order C-B-A; 4KiB gaps: none
+ */
+
 / {
 	soc {
 		/* Small piece of Global RAM for the radio loader to use during FW relocation. */
@@ -32,15 +37,15 @@
 		};
 
 		/* Image 0, slot 0 (primary slot) - Application code for cpuapp core. */
-		slot0_partition: cpuapp_slot0_partition: partition@40000 {
-			reg = <0x40000 DT_SIZE_K(324)>;
+		slot0_partition: cpuapp_slot0_partition: partition@74000 {
+			reg = <0x74000 DT_SIZE_K(324)>;
 		};
 
 		/* Image 2, slot 0 (primary slot) - radio loader code for cpurad core. */
 		slot4_partition: cpurad_slot0_partition: cpurad_loader_partition:
-		partition@92000 {
+		partition@70000 {
 			label = "cpurad_loader_partition";
-			reg = <0x92000 DT_SIZE_K(16)>;
+			reg = <0x70000 DT_SIZE_K(16)>;
 			/* size: radio loader + 2KB trailer MCUboot
 			 * (imgtool assumes that the swap mode is used always)
 			 */
@@ -49,9 +54,9 @@
 		/* Image 1, slot 0 (primary slot) - radio core application code initially stored
 		 * in MRAM that will be loaded to TCM by radio loader for cpurad core.
 		 */
-		slot2_partition: cpurad_slot2_partition: cpurad_loaded_fw: partition@96000 {
+		slot2_partition: cpurad_slot2_partition: cpurad_loaded_fw: partition@40000 {
 			label = "cpurad_loaded_fw";
-			reg = <0x96000 (DT_SIZE_K(192))>;
+			reg = <0x40000 (DT_SIZE_K(192))>;
 			/* size: application + 192B for s2ram + 2KB trailer MCUboot */
 		};
 
@@ -64,15 +69,15 @@
 		};
 
 		/* Image 0, slot 1 (secondary slot) - Application code for cpuapp core. */
-		slot1_partition: cpuapp_slot1_partition: partition@100000 {
-			reg = <0x100000 DT_SIZE_K(324)>;
+		slot1_partition: cpuapp_slot1_partition: partition@134000 {
+			reg = <0x134000 DT_SIZE_K(324)>;
 		};
 
 		/* Image 2, slot 1 (secondary slot) - radio loader code for cpurad core. */
 		slot5_partition: cpurad_slot1_partition: cpurad_loader_partition_slot1:
-		partition@152000 {
+		partition@130000 {
 			label = "cpurad_loader_partition_slot1";
-			reg = <0x152000 DT_SIZE_K(16)>;
+			reg = <0x130000 DT_SIZE_K(16)>;
 			/* size: radio loader + 2KB trailer MCUboot
 			 * (imgtool assumes that the swap mode is used always)
 			 */
@@ -81,9 +86,9 @@
 		/* Image 1, slot 1 (secondary slot) - radio core application code initially stored
 		 * in MRAM that will be loaded to TCM by radio loader for cpurad core.
 		 */
-		slot3_partition: cpurad_slot3_partition: cpurad_loaded_fw_slot1: partition@156000 {
+		slot3_partition: cpurad_slot3_partition: cpurad_loaded_fw_slot1: partition@100000 {
 			label = "cpurad_loaded_fw_slot1";
-			reg = <0x156000 (DT_SIZE_K(192))>;
+			reg = <0x100000 (DT_SIZE_K(192))>;
 			/* size: application + 192B for s2ram + 2KB trailer MCUboot */
 		};
 

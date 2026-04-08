@@ -1,0 +1,14 @@
+connect
+w4 0e030000 1 2 3 4 # boot image- (mcuboot) start
+w4 0e038000 1 2 3 4 # boot image- (mcuboot) mid
+w4 0e03fff0 1 2 3 4 # boot image- (mcuboot) end
+w4 0e040000 1 2 3 4 # primary image0 slot0 (cpuapp) start
+w4 0e068800 1 2 3 4 # primary image0 slot0 (cpuapp) mid
+w4 0e090ff0 1 2 3 4 # primary image0 slot0 (cpuapp) end
+w4 0e091000 1 2 3 4 # primary image2 slot4 (cpurad loader) start
+w4 0e093000 1 2 3 4 # primary image2 slot4 (cpurad loader) mid
+w4 0e094ff0 1 2 3 4 # primary image2 slot4 (cpurad loader) end
+w4 0e095000 1 2 3 4 # primary image1 slot2 (cpurad fw) start
+w4 0e0ad000 1 2 3 4 # primary image1 slot2 (cpurad fw) mid
+w4 0e0c4ff0 1 2 3 4 # primary image1 slot2 (cpurad fw) end
+exit

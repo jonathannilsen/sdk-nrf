@@ -1,0 +1,29 @@
+connect
+w4 0e030000 1 2 3 4 # boot image- (mcuboot) start
+w4 0e038000 1 2 3 4 # boot image- (mcuboot) mid
+w4 0e03fff0 1 2 3 4 # boot image- (mcuboot) end
+w4 0e040000 1 2 3 4 # primary image0 slot0 (cpuapp) start
+w4 0e068800 1 2 3 4 # primary image0 slot0 (cpuapp) mid
+w4 0e090ff0 1 2 3 4 # primary image0 slot0 (cpuapp) end
+w4 0e091000 1 2 3 4 # primary image2 slot4 (cpurad loader) start
+w4 0e093000 1 2 3 4 # primary image2 slot4 (cpurad loader) mid
+w4 0e094ff0 1 2 3 4 # primary image2 slot4 (cpurad loader) end
+w4 0e095000 1 2 3 4 # primary gap image1-image2 (slot4 (cpurad loader) -> slot2 (cpurad fw)) start
+w4 0e095800 1 2 3 4 # primary gap image1-image2 (slot4 (cpurad loader) -> slot2 (cpurad fw)) mid
+w4 0e095ff0 1 2 3 4 # primary gap image1-image2 (slot4 (cpurad loader) -> slot2 (cpurad fw)) end
+w4 0e096000 1 2 3 4 # primary image1 slot2 (cpurad fw) start
+w4 0e0ae000 1 2 3 4 # primary image1 slot2 (cpurad fw) mid
+w4 0e0c5ff0 1 2 3 4 # primary image1 slot2 (cpurad fw) end
+w4 0e0c6000 1 2 3 4 # other image- post-primary to secure_storage start
+w4 0e100000 1 2 3 4 # secondary image0 slot1 (cpuapp) start
+w4 0e128800 1 2 3 4 # secondary image0 slot1 (cpuapp) mid
+w4 0e150ff0 1 2 3 4 # secondary image0 slot1 (cpuapp) end
+w4 0e151000 1 2 3 4 # secondary image2 slot5 (cpurad loader) start
+w4 0e153000 1 2 3 4 # secondary image2 slot5 (cpurad loader) mid
+w4 0e154ff0 1 2 3 4 # secondary image2 slot5 (cpurad loader) end
+w4 0e156000 1 2 3 4 # secondary image1 slot3 (cpurad fw) start
+w4 0e161800 1 2 3 4 # secondary image1 post-primary to secure_storage mid
+w4 0e16e000 1 2 3 4 # secondary image1 slot3 (cpurad fw) mid
+w4 0e185ff0 1 2 3 4 # secondary image1 slot3 (cpurad fw) end
+w4 0e1fcff0 1 2 3 4 # other image- post-primary to secure_storage end
+exit

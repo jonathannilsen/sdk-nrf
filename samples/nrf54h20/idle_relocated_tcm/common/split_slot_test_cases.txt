@@ -1,0 +1,32 @@
+Split-slot variants (FILE_SUFFIX=split_slot_N). A=cpuapp, B=cpurad loader, C=cpurad FW.
+Primary order is by rising MRAM address; secondary mirrors it. gap = 4 KiB after Nth primary in that order.
+
+Sample cases: 0, 3, 8, 20
+
+N   perm  order    gaps
+0   0     A-B-C    none
+1   0     A-B-C    after 1st
+2   0     A-B-C    after 2nd
+3   0     A-B-C    after 1st + 2nd
+4   1     A-C-B    none
+5   1     A-C-B    after 1st
+6   1     A-C-B    after 2nd
+7   1     A-C-B    after 1st + 2nd
+8   2     B-A-C    none
+9   2     B-A-C    after 1st
+10  2     B-A-C    after 2nd
+11  2     B-A-C    after 1st + 2nd
+12  3     B-C-A    none
+13  3     B-C-A    after 1st
+14  3     B-C-A    after 2nd
+15  3     B-C-A    after 1st + 2nd
+16  4     C-A-B    none
+17  4     C-A-B    after 1st
+18  4     C-A-B    after 2nd
+19  4     C-A-B    after 1st + 2nd
+20  5     C-B-A    none
+21  5     C-B-A    after 1st
+22  5     C-B-A    after 2nd
+23  5     C-B-A    after 1st + 2nd
+
+Layout: common/memory_map_split_slot_N.dtsi. J-Link probes: ../test_writes_N.jlink.

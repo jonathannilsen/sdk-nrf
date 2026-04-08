@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+/*
+ * Split-slot MRAM layout variant 2/23 for idle_relocated_tcm.
+ * perm 0 order A-B-C; 4KiB gaps: after 2nd
+ */
+
 / {
 	soc {
 		/* Small piece of Global RAM for the radio loader to use during FW relocation. */
@@ -38,9 +43,9 @@
 
 		/* Image 2, slot 0 (primary slot) - radio loader code for cpurad core. */
 		slot4_partition: cpurad_slot0_partition: cpurad_loader_partition:
-		partition@92000 {
+		partition@91000 {
 			label = "cpurad_loader_partition";
-			reg = <0x92000 DT_SIZE_K(16)>;
+			reg = <0x91000 DT_SIZE_K(16)>;
 			/* size: radio loader + 2KB trailer MCUboot
 			 * (imgtool assumes that the swap mode is used always)
 			 */
@@ -70,9 +75,9 @@
 
 		/* Image 2, slot 1 (secondary slot) - radio loader code for cpurad core. */
 		slot5_partition: cpurad_slot1_partition: cpurad_loader_partition_slot1:
-		partition@152000 {
+		partition@151000 {
 			label = "cpurad_loader_partition_slot1";
-			reg = <0x152000 DT_SIZE_K(16)>;
+			reg = <0x151000 DT_SIZE_K(16)>;
 			/* size: radio loader + 2KB trailer MCUboot
 			 * (imgtool assumes that the swap mode is used always)
 			 */

@@ -26,3 +26,195 @@ tests:
       - nrf54h20dk/nrf54h20/cpuapp
     extra_args:
       - FILE_SUFFIX=split_slot
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_0:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_0
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_1:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_1
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_2:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_2
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_3:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_3
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_4:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_4
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_5:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_5
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_6:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_6
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_7:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_7
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_8:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_8
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_9:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_9
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_10:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_10
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_11:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_11
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_12:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_12
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_13:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_13
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_14:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_14
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_15:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_15
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_16:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_16
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_17:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_17
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_18:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_18
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_19:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_19
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_20:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_20
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_21:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_21
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_22:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_22
+  benchmarks.multicore.idle_relocated_tcm.nrf54h20dk_cpuapp_cpurad.direct_xip.split_slot_23:
+    harness: console
+    platform_allow:
+      - nrf54h20dk/nrf54h20/cpuapp
+    integration_platforms:
+      - nrf54h20dk/nrf54h20/cpuapp
+    extra_args:
+      - FILE_SUFFIX=split_slot_23
