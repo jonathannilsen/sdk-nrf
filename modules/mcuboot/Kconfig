@@ -147,6 +147,7 @@ config NCS_MCUBOOT_PERIPHCONF_TLV
 	bool "Output PERIPHCONF TLV BIN file"
 	depends on HAS_IRONSIDE_SE
 	depends on BOOTLOADER_MCUBOOT
+	depends on NRF_PERIPHCONF_SECTION
 	help
 	  Generate a binary file containing PERIPHCONF TLV data to add to the
 	  image trailer. The TLV informs MCUboot about PERIPHCONF sections in the image data.
