@@ -1,0 +1,35 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menuconfig MGMT_IRONSIDE_SE_UPDATE
+	bool "IronSide SE firmware update over SMP"
+	depends on MCUMGR
+	depends on IRONSIDE_SE_CALL
+	depends on FLASH
+	depends on FLASH_MAP
+	select STREAM_FLASH
+	help
+	  Enables a custom MCUmgr command group that accepts chunked
+	  firmware uploads into a staging flash partition and triggers
+	  an IronSide SE update when the full blob has been received.
+
+	  A DTS partition labeled "ironside_se_update_partition" must
+	  exist within the valid IronSide SE update address range.
+
+if MGMT_IRONSIDE_SE_UPDATE
+
+config MGMT_IRONSIDE_SE_UPDATE_WRITE_BUF_SIZE
+	int "Flash write buffer size"
+	default 64
+	help
+	  Size of the internal buffer used for flash write alignment.
+	  Must be a multiple of the flash write block size.
+
+module = MGMT_IRONSIDE_SE_UPDATE
+module-str = IronSide SE update mgmt
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endif # MGMT_IRONSIDE_SE_UPDATE

@@ -32,6 +32,7 @@ endif()
 add_subdirectory(mpsl)
 
 add_subdirectory_ifdef(CONFIG_MGMT_FMFU mgmt/fmfu)
+add_subdirectory_ifdef(CONFIG_MGMT_IRONSIDE_SE_UPDATE mgmt/ironside_se_update)
 add_subdirectory_ifdef(CONFIG_GAZELL gazell)
 
 if(CONFIG_NFC_T2T_NRFXLIB OR CONFIG_NFC_T4T_NRFXLIB OR CONFIG_NFC_T2T_PARSER OR
