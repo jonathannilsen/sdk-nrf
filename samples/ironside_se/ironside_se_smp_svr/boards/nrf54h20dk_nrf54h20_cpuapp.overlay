@@ -1,0 +1,18 @@
+/*
+ * Define an IronSide SE update staging partition in the valid update
+ * address range (0x0e100000 – 0x0e1d8000 on nRF54H20).
+ *
+ * The secondary MCUboot slots that occupy the same region by default
+ * are removed because this sample does not use MCUboot DFU.
+ */
+
+/delete-node/ &cpuapp_slot1_partition;
+/delete-node/ &cpurad_slot1_partition;
+
+&mram1x {
+	partitions {
+		ironside_se_update_partition: partition@100000 {
+			reg = <0x100000 0x28000>; /* 160 KiB */
+		};
+	};
+};
