@@ -1,0 +1,24 @@
+/* Copyright (c) 2026 Nordic Semiconductor ASA
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/* Disable zephyr drivers for IronSide Call / BELLBOARDs (mbox) */
+&psa_rng {
+	status = "disabled";
+};
+
+&cpusec_cpurad_ipc {
+	status = "disabled";
+};
+
+&cpusec_bellboard {
+	status = "disabled";
+};
+
+/* Disable interrupt for IronSide IPC RX event.
+ * Others are kept as they are in the board defaults.
+ */
+&cpurad_bellboard {
+	/* irq0: 6: cpurad-cpusys, 12: cpurad-cpuapp */
+	nordic,interrupt-mapping = <0x00001040 0>;
+};
